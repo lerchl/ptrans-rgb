@@ -114,7 +114,7 @@ int main(int argc, char *argv[]) {
     // // We accept multiple format lines
     //
     // std::vector<std::string> format_lines;
-    Color color(255, 255, 0);
+    Color color(100, 0, 255);
     Color bg_color(0, 0, 0);
     // Color outline_color(0, 0, 0);
     // bool with_outline = false;
@@ -211,12 +211,33 @@ int main(int argc, char *argv[]) {
     //
     signal(SIGTERM, InterruptHandler);
     signal(SIGINT, InterruptHandler);
+
+    using namespace std::chrono;
+
+    // Example ISO 8601 UTC string
+    // Parse the ISO string into a time_point
+    utc_time<seconds> tp_from_str;
+    std::istringstream in{timetable.trips[0].departures[0].when};
+    in >> parse("%Y-%m-%dT%H:%M:%SZ", tp_from_str);
+    if (in.fail()) {
+        std::cerr << "Failed to parse ISO datetime.\n";
+        return 1;
+    }
+
+    // Get current UTC time
+    auto now_tp = utc_clock::now();
+
+    // Compute difference in minutes
+    auto diff_minutes = duration_cast<minutes>(tp_from_str - now_tp).count();
+
     //
     while (!interrupt_received) {
         offscreen->Fill(bg_color.r, bg_color.g, bg_color.b);
         rgb_matrix::DrawText(
             offscreen, font, 0, 0 + font.baseline(), color, NULL,
-            (timetable.trips[0].line + timetable.trips[0].direction).c_str(),
+            (timetable.trips[0].line + " " + timetable.trips[0].direction +
+             " " + std::to_string(diff_minutes))
+                .c_str(),
             0);
 
         // Atomic swap with double buffer
