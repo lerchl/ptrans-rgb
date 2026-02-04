@@ -7,7 +7,7 @@ RGB_LIBRARY=$(RGB_LIBDIR)/lib$(RGB_LIBRARY_NAME).a
 HTTP_LIB_DIR=external/cpp-httplib
 JSON_LIB_DIR=external/json/single_include
 
-LDFLAGS+=-L$(RGB_LIBDIR) -l$(RGB_LIBRARY_NAME) -lrt -lm -lpthread -lssl -lcrypto
+LDFLAGS+=-L $(RGB_LIBDIR) -l$(RGB_LIBRARY_NAME) -lrt -lm -lpthread -lssl -lcrypto
 
 CXX=g++
 CXXFLAGS=-std=c++23 -Wall -Wextra -O3
