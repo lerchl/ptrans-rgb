@@ -219,15 +219,28 @@ int main(int argc, char *argv[]) {
         offscreen->Fill(bg_color.r, bg_color.g, bg_color.b);
 
         for (int index : std::views::iota(0, (int)timetable.trips.size())) {
-            std::string line =
-                timetable.trips[index].line + " " +
-                timetable.trips[index].direction + " " +
-                (timetable.trips[index].departures[0].real_time ? "\"" : "") +
+            // std::string line =
+            //     timetable.trips[index].line + " " +
+            //     timetable.trips[index].direction + " " +
+            //     (timetable.trips[index].departures[0].real_time ? "\"" : "")
+            //     +
+            //     std::to_string(timetable.trips[index].departures[0].countdown);
+            //
+            // rgb_matrix::DrawText(offscreen, font, 0,
+            //                      0 + (index + 1) * font.baseline() + 8,
+            //                      color, NULL, line.c_str(), 0);
+            std::string main_text = timetable.trips[index].line + " " +
+                                    timetable.trips[index].direction;
+            std::string countdown =
                 std::to_string(timetable.trips[index].departures[0].countdown);
 
             rgb_matrix::DrawText(offscreen, font, 0,
-                                 0 + (index + 1) * font.baseline() + 4, color,
-                                 NULL, line.c_str(), 0);
+                                 (index + 1) * font.baseline() + 8, color, NULL,
+                                 main_text.c_str(), 0);
+
+            rgb_matrix::DrawText(offscreen, font, 50,
+                                 (index + 1) * font.baseline() + 8, color, NULL,
+                                 countdown.c_str(), 0);
         }
 
         // Atomic swap with double buffer
