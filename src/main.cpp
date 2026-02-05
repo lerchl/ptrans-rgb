@@ -55,15 +55,17 @@ using json = nlohmann::json;
 
 struct DepartureDto {
     std::optional<std::string> direction;
-    std::string when;
-    std::optional<std::string> when_actually;
+    int countdown;
+    bool real_time;
+    bool late;
     bool traffic_jam;
 };
 
 inline void from_json(const json &j, DepartureDto &d) {
     d.direction = j.value("direction", std::optional<std::string>{});
-    d.when = j.at("when").get<std::string>();
-    d.when_actually = j.value("when_actually", std::optional<std::string>{});
+    d.countdown = j.at("countdown").get<int>();
+    d.real_time = j.at("real_time").get<bool>();
+    d.late = j.at("late").get<bool>();
     d.traffic_jam = j.at("traffic_jam").get<bool>();
 }
 
@@ -212,31 +214,13 @@ int main(int argc, char *argv[]) {
     signal(SIGTERM, InterruptHandler);
     signal(SIGINT, InterruptHandler);
 
-    using namespace std::chrono;
-
-    // Example ISO 8601 UTC string
-    // Parse the ISO string into a time_point
-    utc_time<seconds> tp_from_str;
-    std::istringstream in{timetable.trips[0].departures[0].when};
-    in >> parse("%Y-%m-%dT%H:%M:%SZ", tp_from_str);
-    if (in.fail()) {
-        std::cerr << "Failed to parse ISO datetime.\n";
-        return 1;
-    }
-
-    // Get current UTC time
-    auto now_tp = utc_clock::now();
-
-    // Compute difference in minutes
-    auto diff_minutes = duration_cast<minutes>(tp_from_str - now_tp).count();
-
-    //
     while (!interrupt_received) {
         offscreen->Fill(bg_color.r, bg_color.g, bg_color.b);
         rgb_matrix::DrawText(
             offscreen, font, 0, 0 + font.baseline(), color, NULL,
             (timetable.trips[0].line + " " + timetable.trips[0].direction +
-             " " + std::to_string(diff_minutes))
+             " " + (timetable.trips[0].departures[0].real_time ? "\"" : "") +
+             std::to_string(timetable.trips[0].departures[0].countdown))
                 .c_str(),
             0);
 
