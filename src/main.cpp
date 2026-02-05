@@ -5,6 +5,7 @@
 #include <httplib.h>
 #include <iostream>
 #include <nlohmann/json.hpp>
+#include <ranges>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -216,13 +217,18 @@ int main(int argc, char *argv[]) {
 
     while (!interrupt_received) {
         offscreen->Fill(bg_color.r, bg_color.g, bg_color.b);
-        rgb_matrix::DrawText(
-            offscreen, font, 0, 0 + font.baseline(), color, NULL,
-            (timetable.trips[0].line + " " + timetable.trips[0].direction +
-             " " + (timetable.trips[0].departures[0].real_time ? "\"" : "") +
-             std::to_string(timetable.trips[0].departures[0].countdown))
-                .c_str(),
-            0);
+
+        for (int index : std::views::iota(0, (int)timetable.trips.size())) {
+            std::string line =
+                timetable.trips[index].line + " " +
+                timetable.trips[index].direction + " " +
+                (timetable.trips[index].departures[0].real_time ? "\"" : "") +
+                std::to_string(timetable.trips[index].departures[0].countdown);
+
+            rgb_matrix::DrawText(offscreen, font, 0,
+                                 0 + (index + 1) * font.baseline() + 4, color,
+                                 NULL, line.c_str(), 0);
+        }
 
         // Atomic swap with double buffer
         offscreen = matrix->SwapOnVSync(offscreen);
