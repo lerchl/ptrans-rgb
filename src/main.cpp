@@ -15,44 +15,20 @@
 #include <vector>
 
 using namespace rgb_matrix;
+using json = nlohmann::json;
 
 volatile bool interrupt_received = false;
-static void InterruptHandler(int signo) { interrupt_received = true; }
+static void interrupt_handler(int signo) {
+    interrupt_received = signo;
+}
 
 static int usage(const char *progname) {
     fprintf(stderr, "usage: %s [options]\n", progname);
-    fprintf(stderr, "Reads text from stdin and displays it. "
-                    "Empty string: clear screen\n");
     fprintf(stderr, "Options:\n");
-    fprintf(
-        stderr,
-        "\t-d <time-format>  : Default '%%H:%%M'. See strftime()\n"
-        "\t                    Can be provided multiple times for multiple "
-        "lines\n"
-        "\t-f <font-file>    : Use given font.\n"
-        "\t-x <x-origin>     : X-Origin of displaying text (Default: 0)\n"
-        "\t-y <y-origin>     : Y-Origin of displaying text (Default: 0)\n"
-        "\t-s <line-spacing> : Extra spacing between lines when multiple -d "
-        "given\n"
-        "\t-S <spacing>      : Extra spacing between letters (Default: 0)\n"
-        "\t-C <r,g,b>        : Color. Default 255,255,0\n"
-        "\t-B <r,g,b>        : Background-Color. Default 0,0,0\n"
-        "\t-O <r,g,b>        : Outline-Color, e.g. to increase contrast.\n"
-        "\n");
+    fprintf(stderr, "\t-f <font-file>    : Use given font.\n");
     rgb_matrix::PrintMatrixFlags(stderr);
     return 1;
 }
-
-static bool parseColor(Color *c, const char *str) {
-    return sscanf(str, "%hhu,%hhu,%hhu", &c->r, &c->g, &c->b) == 3;
-}
-
-static bool FullSaturation(const Color &c) {
-    return (c.r == 0 || c.r == 255) && (c.g == 0 || c.g == 255) &&
-           (c.b == 0 || c.b == 255);
-}
-
-using json = nlohmann::json;
 
 struct DepartureDto {
     std::optional<std::string> direction;
@@ -100,91 +76,32 @@ inline TimetableDto parse_timetable(const std::string &body) {
 }
 
 int main(int argc, char *argv[]) {
-    httplib::Client cli("10.0.0.164:3000");
-
-    TimetableDto timetable;
-    if (auto res = cli.Get("/timetable")) {
-        timetable = parse_timetable(res->body);
-    }
-
     RGBMatrix::Options matrix_options;
     rgb_matrix::RuntimeOptions runtime_opt;
     if (!rgb_matrix::ParseOptionsFromFlags(&argc, &argv, &matrix_options,
                                            &runtime_opt)) {
         return usage(argv[0]);
     }
-    //
-    // // We accept multiple format lines
-    //
-    // std::vector<std::string> format_lines;
     Color color(100, 0, 255);
     Color bg_color(0, 0, 0);
-    // Color outline_color(0, 0, 0);
-    // bool with_outline = false;
-    //
     const char *bdf_font_file = NULL;
-    // int x_orig = 0;
-    // int y_orig = 0;
-    // int letter_spacing = 0;
-    // int line_spacing = 0;
-    //
+
     int opt;
     while ((opt = getopt(argc, argv, "x:y:f:C:B:O:s:S:d:")) != -1) {
         switch (opt) {
-        // case 'd':
-        //     format_lines.push_back(optarg);
-        //     break;
-        // case 'x':
-        //     x_orig = atoi(optarg);
-        //     break;
-        // case 'y':
-        //     y_orig = atoi(optarg);
-        //     break;
         case 'f':
             bdf_font_file = strdup(optarg);
             break;
-        // case 's':
-        //     line_spacing = atoi(optarg);
-        //     break;
-        // case 'S':
-        //     letter_spacing = atoi(optarg);
-        //     break;
-        // case 'C':
-        //     if (!parseColor(&color, optarg)) {
-        //         fprintf(stderr, "Invalid color spec: %s\n", optarg);
-        //         return usage(argv[0]);
-        //     }
-        //     break;
-        // case 'B':
-        //     if (!parseColor(&bg_color, optarg)) {
-        //         fprintf(stderr, "Invalid background color spec: %s\n",
-        //         optarg); return usage(argv[0]);
-        //     }
-        //     break;
-        // case 'O':
-        //     if (!parseColor(&outline_color, optarg)) {
-        //         fprintf(stderr, "Invalid outline color spec: %s\n", optarg);
-        //         return usage(argv[0]);
-        //     }
-        //     with_outline = true;
-        //     break;
         default:
             return usage(argv[0]);
         }
     }
-    //
-    // if (format_lines.empty()) {
-    //     format_lines.push_back("%H:%M");
-    // }
-    //
+
     if (bdf_font_file == NULL) {
         fprintf(stderr, "Need to specify BDF font-file with -f\n");
         return usage(argv[0]);
     }
-    //
-    // /*
-    //  * Load font. This needs to be a filename with a bdf bitmap font.
-    //  */
+
     rgb_matrix::Font font;
     if (!font.LoadFont(bdf_font_file)) {
         fprintf(stderr, "Couldn't load font '%s'\n", bdf_font_file);
@@ -195,52 +112,47 @@ int main(int argc, char *argv[]) {
         RGBMatrix::CreateFromOptions(matrix_options, runtime_opt);
     if (matrix == NULL)
         return 1;
-    //
-    // const bool all_extreme_colors =
-    //     (matrix_options.brightness == 100) && FullSaturation(color) &&
-    //     FullSaturation(bg_color) && FullSaturation(outline_color);
-    // if (all_extreme_colors)
-    //     matrix->SetPWMBits(1);
-    //
-    // const int x = x_orig;
-    // int y = y_orig;
-    //
-    FrameCanvas *offscreen = matrix->CreateFrameCanvas();
-    //
-    // struct timespec next_time;
-    // next_time.tv_sec = time(NULL);
-    // next_time.tv_nsec = 0;
-    // struct tm tm;
-    //
-    signal(SIGTERM, InterruptHandler);
-    signal(SIGINT, InterruptHandler);
 
+    FrameCanvas *offscreen = matrix->CreateFrameCanvas();
+
+    signal(SIGTERM, interrupt_handler);
+    signal(SIGINT, interrupt_handler);
+
+    httplib::Client cli("10.0.0.164:3000");
     while (!interrupt_received) {
+
+        TimetableDto timetable;
+        if (auto res = cli.Get("/timetable")) {
+            timetable = parse_timetable(res->body);
+        } else {
+            std::cerr << "Failed to fetch timetable" << std::endl;
+        }
+
         offscreen->Fill(bg_color.r, bg_color.g, bg_color.b);
 
         for (int index : std::views::iota(0, (int)timetable.trips.size())) {
-            std::string line_name = timetable.trips[index].line; // ≤3 chars
-            std::string direction =
-                timetable.trips[index].direction; // fits comfortably
+            std::string line_name = timetable.trips[index].line;
+            std::string direction = timetable.trips[index].direction;
             int countdown = timetable.trips[index].departures[0].countdown;
             bool real_time = timetable.trips[index].departures[0].real_time;
 
             std::string line =
-                std::format("{:<3} {:<20} {}{:>3}", line_name, direction,
-                            (real_time ? "\"" : " "), countdown);
+                std::format("{:<3} {:<12} {:>3}", line_name, direction,
+                            (real_time ? "\"" : " ") + countdown);
 
             rgb_matrix::DrawText(offscreen, font, 0,
-                                 0 + (index + 1) * font.baseline() + 8, color,
-                                 NULL, line.c_str(), 0);
+                                 0 + (index + 1) * font.baseline() +
+                                     (index > 0 ? 8 : 0),
+                                 color, NULL, line.c_str(), 0);
         }
 
         // Atomic swap with double buffer
         offscreen = matrix->SwapOnVSync(offscreen);
+        std::this_thread::sleep_for(std::chrono::seconds(30));
     }
 
-    // Finished. Shut down the RGB matrix.
     delete matrix;
 
-    std::cout << std::endl; // Create a fresh new line after ^C on screen
+    std::cout << std::endl;
     return 0;
 }

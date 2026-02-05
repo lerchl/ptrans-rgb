@@ -20,4 +20,4 @@ build_folder:
 	mkdir build
 
 main: $(RGB_LIBRARY) build_folder
-	$(CXX) $(CXXFLAGS) src/main.cpp -o build/ptrans-rgb -I $(HTTP_LIB_DIR) -I $(JSON_LIB_DIR) -I $(RGB_INCDIR) $(LDFLAGS)
+	$(CXX) $(CXXFLAGS) src/main.cpp -o build/ptrans-rgb -isystem $(HTTP_LIB_DIR) -isystem $(JSON_LIB_DIR) -isystem $(RGB_INCDIR) $(LDFLAGS)
