@@ -1,6 +1,7 @@
 #include "graphics.h"
 #include "led-matrix.h"
 
+#include <cstdlib>
 #include <getopt.h>
 #include <httplib.h>
 #include <iostream>
@@ -17,9 +18,13 @@
 using namespace rgb_matrix;
 using json = nlohmann::json;
 
-volatile bool interrupt_received = false;
+RGBMatrix *matrix;
+
 static void interrupt_handler(int signo) {
-    interrupt_received = signo;
+    (void)signo;
+    delete matrix;
+    std::cout << std::endl;
+    exit(0);
 }
 
 static int usage(const char *progname) {
@@ -108,10 +113,10 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    RGBMatrix *matrix =
-        RGBMatrix::CreateFromOptions(matrix_options, runtime_opt);
-    if (matrix == NULL)
+    matrix = RGBMatrix::CreateFromOptions(matrix_options, runtime_opt);
+    if (matrix == NULL) {
         return 1;
+    }
 
     FrameCanvas *offscreen = matrix->CreateFrameCanvas();
 
@@ -119,8 +124,8 @@ int main(int argc, char *argv[]) {
     signal(SIGINT, interrupt_handler);
 
     httplib::Client cli("10.0.0.164:3000");
-    while (!interrupt_received) {
 
+    for (;;) {
         TimetableDto timetable;
         if (auto res = cli.Get("/timetable")) {
             timetable = parse_timetable(res->body);
@@ -137,7 +142,7 @@ int main(int argc, char *argv[]) {
             bool real_time = timetable.trips[index].departures[0].real_time;
 
             std::string line =
-                std::format("{:<3} {:<12} {:>3}", line_name, direction,
+                std::format("{:<3} {:<10} {:>3}", line_name, direction,
                             (real_time ? "\"" : " ") + countdown);
 
             rgb_matrix::DrawText(offscreen, font, 0,
@@ -150,9 +155,4 @@ int main(int argc, char *argv[]) {
         offscreen = matrix->SwapOnVSync(offscreen);
         std::this_thread::sleep_for(std::chrono::seconds(30));
     }
-
-    delete matrix;
-
-    std::cout << std::endl;
-    return 0;
 }
