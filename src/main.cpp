@@ -46,23 +46,33 @@ static int usage(const char *progname) {
     return 1;
 }
 
+struct BrightnessDto {
+    int brightness;
+};
+
+inline void from_json(const json &j, BrightnessDto &b) {
+    b.brightness = j.at("brightness").get<int>();
+}
+
 void start_http_server() {
-    server.Get(R"(/brightness/(\d+))",
-               [](const httplib::Request &req, httplib::Response &res) {
-                   try {
-                       int new_brightness = std::stoi(req.matches[1]);
+    server.Post(
+        "/brightness", [](const httplib::Request &req, httplib::Response &res) {
+            try {
+                int new_brightness =
+                    json::parse(req.body).get<BrightnessDto>().brightness;
 
-                       if (new_brightness < 0 || new_brightness > 100) {
-                           res.status = 400;
-                           return;
-                       }
+                if (new_brightness < 0 || new_brightness > 100) {
+                    res.status = 400;
+                    return;
+                }
 
-                       brightness.store(new_brightness);
-                       res.status = 200;
-                   } catch (const std::invalid_argument &e) {
-                       res.status = 400;
-                   }
-               });
+                brightness.store(new_brightness);
+                res.status = 200;
+            } catch (const json::parse_error &e) {
+                res.status = 400;
+            }
+        });
+
     server.listen("0.0.0.0", 8080);
 }
 
