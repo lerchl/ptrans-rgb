@@ -1,13 +1,16 @@
 #include "graphics.h"
 #include "led-matrix.h"
 
+#include <atomic>
 #include <cstdlib>
+#include <exception>
 #include <getopt.h>
 #include <httplib.h>
 #include <iostream>
 #include <nlohmann/json.hpp>
 #include <ranges>
 #include <signal.h>
+#include <stdexcept>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,10 +21,16 @@
 using json = nlohmann::json;
 
 rgb_matrix::RGBMatrix *matrix;
+httplib::Server server;
+std::thread http_thread;
+
+std::atomic<int> brightness{80};
 
 static void interrupt_handler(int signo) {
     (void)signo;
     delete matrix;
+    server.stop();
+    http_thread.join();
     std::cout << std::endl;
     exit(0);
 }
@@ -35,6 +44,26 @@ static int usage(const char *progname) {
             "\t-F <font-file>    : Use given font for large text (6x12).\n");
     rgb_matrix::PrintMatrixFlags(stderr);
     return 1;
+}
+
+void start_http_server() {
+    server.Get(R"(/brightness/(\d+))",
+               [](const httplib::Request &req, httplib::Response &res) {
+                   try {
+                       int new_brightness = std::stoi(req.matches[1]);
+
+                       if (new_brightness < 0 || new_brightness > 100) {
+                           res.status = 400;
+                           return;
+                       }
+
+                       brightness.store(new_brightness);
+                       res.status = 200;
+                   } catch (const std::invalid_argument &e) {
+                       res.status = 400;
+                   }
+               });
+    server.listen("0.0.0.0", 8080);
 }
 
 struct DepartureDto {
@@ -86,7 +115,7 @@ std::string real_time_indicator(bool real_time, bool late, bool traffic_jam) {
     if (traffic_jam) {
         return "t";
     } else if (late) {
-        return "+";
+        return ".";
     } else if (real_time) {
         return "\"";
     }
@@ -165,12 +194,17 @@ int main(int argc, char *argv[]) {
     signal(SIGTERM, interrupt_handler);
     signal(SIGINT, interrupt_handler);
 
+    http_thread = std::thread(start_http_server);
+
     httplib::Client cli("10.0.0.164:3000");
 
     for (;;) {
+        matrix->SetBrightness(brightness);
         TimetableDto timetable;
-        if (auto res = cli.Get("/timetable")) {
-            timetable = parse_timetable(res->body);
+        auto result = cli.Get("/timetable");
+
+        if (result && result->status == 200) {
+            timetable = parse_timetable(result->body);
         } else {
             std::cerr << "Failed to fetch timetable" << std::endl;
             std::this_thread::sleep_for(std::chrono::seconds(30));
