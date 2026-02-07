@@ -15,10 +15,9 @@
 #include <time.h>
 #include <vector>
 
-using namespace rgb_matrix;
 using json = nlohmann::json;
 
-RGBMatrix *matrix;
+rgb_matrix::RGBMatrix *matrix;
 
 static void interrupt_handler(int signo) {
     (void)signo;
@@ -30,8 +29,10 @@ static void interrupt_handler(int signo) {
 static int usage(const char *progname) {
     fprintf(stderr, "usage: %s [options]\n", progname);
     fprintf(stderr, "Options:\n");
-    fprintf(stderr, "\t-f <font-file>    : Use given font for small text.\n");
-    fprintf(stderr, "\t-F <font-file>    : Use given font for large text.\n");
+    fprintf(stderr,
+            "\t-f <font-file>    : Use given font for small text (5x8).\n");
+    fprintf(stderr,
+            "\t-F <font-file>    : Use given font for large text (6x12).\n");
     rgb_matrix::PrintMatrixFlags(stderr);
     return 1;
 }
@@ -85,7 +86,7 @@ std::string real_time_indicator(bool real_time, bool late, bool traffic_jam) {
     if (traffic_jam) {
         return "t";
     } else if (late) {
-        return "l";
+        return "+";
     } else if (real_time) {
         return "\"";
     }
@@ -93,15 +94,26 @@ std::string real_time_indicator(bool real_time, bool late, bool traffic_jam) {
     return "";
 }
 
+int write_line(rgb_matrix::FrameCanvas *canvas, rgb_matrix::Font &font, int y,
+               rgb_matrix::Color color, std::string text) {
+    rgb_matrix::DrawText(canvas, font, 0, y, color, NULL, text.c_str(), 0);
+
+    // returns the y position for the next line
+    return y + font.baseline() + 4;
+}
+
 int main(int argc, char *argv[]) {
-    RGBMatrix::Options matrix_options;
+    rgb_matrix::RGBMatrix::Options matrix_options;
     rgb_matrix::RuntimeOptions runtime_opt;
+
     if (!rgb_matrix::ParseOptionsFromFlags(&argc, &argv, &matrix_options,
                                            &runtime_opt)) {
         return usage(argv[0]);
     }
-    Color color(100, 0, 255);
-    Color bg_color(0, 0, 0);
+
+    rgb_matrix::Color fg_color_default(100, 0, 255);
+    rgb_matrix::Color fg_color_late(255, 0, 0);
+    rgb_matrix::Color bg_color(0, 0, 0);
 
     const char *bdf_font_file_small = NULL;
     const char *bdf_font_file_large = NULL;
@@ -142,12 +154,13 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    matrix = RGBMatrix::CreateFromOptions(matrix_options, runtime_opt);
+    matrix =
+        rgb_matrix::RGBMatrix::CreateFromOptions(matrix_options, runtime_opt);
     if (matrix == NULL) {
         return 1;
     }
 
-    FrameCanvas *offscreen = matrix->CreateFrameCanvas();
+    auto *offscreen = matrix->CreateFrameCanvas();
 
     signal(SIGTERM, interrupt_handler);
     signal(SIGINT, interrupt_handler);
@@ -165,9 +178,9 @@ int main(int argc, char *argv[]) {
         }
 
         offscreen->Fill(bg_color.r, bg_color.g, bg_color.b);
+        int y_next_line = 0;
 
-        // for (int i : std::views::iota(0, (int)timetable.trips.size())) {
-        for (int i : std::views::iota(0, 1)) {
+        for (int i : std::views::iota(0, (int)timetable.trips.size())) {
             std::string line_name = timetable.trips[i].line;
             std::string direction = timetable.trips[i].direction;
 
@@ -175,10 +188,8 @@ int main(int argc, char *argv[]) {
                 std::string line = std::format("{:<3} {:<13} {:>3}", line_name,
                                                direction, "N/A");
 
-                rgb_matrix::DrawText(offscreen, font_large, 0,
-                                     0 + (i + 1) * font_large.baseline() +
-                                         i * 4,
-                                     color, NULL, line.c_str(), 0);
+                y_next_line = write_line(offscreen, font_large, y_next_line,
+                                         fg_color_default, line);
                 continue;
             }
 
@@ -192,9 +203,8 @@ int main(int argc, char *argv[]) {
                 real_time_indicator(real_time, late, traffic_jam) +
                     (countdown == 0 ? "*" : std::to_string(countdown)));
 
-            rgb_matrix::DrawText(offscreen, font_large, 0,
-                                 0 + (i + 1) * font_large.baseline() + i * 4,
-                                 color, NULL, line.c_str(), 0);
+            y_next_line = write_line(offscreen, font_large, y_next_line,
+                                     fg_color_default, line);
 
             if (timetable.trips[i].departures.size() > 1) {
                 std::string str = "";
@@ -211,12 +221,9 @@ int main(int argc, char *argv[]) {
                     str += ((str.length() == 0 ? "" : ", ") + s);
                 }
 
-                std::string line = std::format("{:>31}", str);
-
-                rgb_matrix::DrawText(offscreen, font_small, 0,
-                                     0 + (i + 1) * font_large.baseline() +
-                                         i * 4 + 4 + font_small.baseline(),
-                                     color, NULL, line.c_str(), 0);
+                y_next_line =
+                    write_line(offscreen, font_small, y_next_line,
+                               fg_color_default, std::format("{:>31}", str));
             }
         }
 
