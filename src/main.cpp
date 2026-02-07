@@ -178,7 +178,7 @@ int main(int argc, char *argv[]) {
         }
 
         offscreen->Fill(bg_color.r, bg_color.g, bg_color.b);
-        int y_next_line = 0;
+        int y_next_line = font_large.baseline();
 
         for (int i : std::views::iota(0, (int)timetable.trips.size())) {
             std::string line_name = timetable.trips[i].line;
@@ -223,7 +223,7 @@ int main(int argc, char *argv[]) {
 
                 y_next_line =
                     write_line(offscreen, font_small, y_next_line,
-                               fg_color_default, std::format("{:>31}", str));
+                               fg_color_default, std::format("{:>25}", str));
             }
         }
 
