@@ -131,24 +131,60 @@ int main(int argc, char *argv[]) {
             timetable = parse_timetable(res->body);
         } else {
             std::cerr << "Failed to fetch timetable" << std::endl;
+            std::this_thread::sleep_for(std::chrono::seconds(30));
+            continue;
         }
 
         offscreen->Fill(bg_color.r, bg_color.g, bg_color.b);
 
-        for (int index : std::views::iota(0, (int)timetable.trips.size())) {
-            std::string line_name = timetable.trips[index].line;
-            std::string direction = timetable.trips[index].direction;
-            int countdown = timetable.trips[index].departures[0].countdown;
-            bool real_time = timetable.trips[index].departures[0].real_time;
+        // for (int i : std::views::iota(0, (int)timetable.trips.size())) {
+        for (int i : std::views::iota(0, 1)) {
+            std::string line_name = timetable.trips[i].line;
+            std::string direction = timetable.trips[i].direction;
 
-            std::string line =
-                std::format("{:<3} {:<10} {:>3}", line_name, direction,
-                            (real_time ? "\"" : " ") + countdown);
+            if (timetable.trips[i].departures.empty()) {
+                std::string line = std::format("{:<3} {:<13} {:>3}", line_name,
+                                               direction, "N/A");
+
+                rgb_matrix::DrawText(offscreen, font, 0,
+                                     0 + (i + 1) * font.baseline() + i * 4,
+                                     color, NULL, line.c_str(), 0);
+                continue;
+            }
+
+            int countdown = timetable.trips[i].departures[0].countdown;
+            bool real_time = timetable.trips[i].departures[0].real_time;
+            bool traffic_jam = timetable.trips[i].departures[0].traffic_jam;
+            std::string real_time_indicator =
+                (traffic_jam ? "t" : (real_time ? "\"" : " "));
+
+            std::string line = std::format(
+                "{:<3} {:<13} {:>3}", line_name, direction,
+                real_time_indicator +
+                    (countdown == 0 ? "*" : std::to_string(countdown)));
 
             rgb_matrix::DrawText(offscreen, font, 0,
-                                 0 + (index + 1) * font.baseline() +
-                                     (index > 0 ? 8 : 0),
-                                 color, NULL, line.c_str(), 0);
+                                 0 + (i + 1) * font.baseline() + i * 4, color,
+                                 NULL, line.c_str(), 0);
+
+            if (timetable.trips[i].departures.size() > 1) {
+                std::string str = "";
+
+                for (auto &&s :
+                     timetable.trips[i].departures | std::views::drop(1) |
+                         std::views::transform([](DepartureDto &departure) {
+                             return std::to_string(departure.countdown);
+                         })) {
+                    str += (", " + s);
+                }
+
+                std::string line = std::format("{:>31}", str);
+
+                rgb_matrix::DrawText(offscreen, font, 0,
+                                     0 + (i + 1) * font.baseline() + i * 4 + 4 +
+                                         font.baseline(),
+                                     color, NULL, line.c_str(), 0);
+            }
         }
 
         // Atomic swap with double buffer
