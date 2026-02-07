@@ -95,7 +95,7 @@ int main(int argc, char *argv[]) {
     const char *bdf_font_file_large = NULL;
 
     int opt;
-    while ((opt = getopt(argc, argv, "f:F")) != -1) {
+    while ((opt = getopt(argc, argv, "f:F:")) != -1) {
         switch (opt) {
         case 'f':
             bdf_font_file_small = strdup(optarg);
