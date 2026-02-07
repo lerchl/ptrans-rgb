@@ -30,7 +30,8 @@ static void interrupt_handler(int signo) {
 static int usage(const char *progname) {
     fprintf(stderr, "usage: %s [options]\n", progname);
     fprintf(stderr, "Options:\n");
-    fprintf(stderr, "\t-f <font-file>    : Use given font.\n");
+    fprintf(stderr, "\t-f <font-file>    : Use given font for small text.\n");
+    fprintf(stderr, "\t-F <font-file>    : Use given font for large text.\n");
     rgb_matrix::PrintMatrixFlags(stderr);
     return 1;
 }
@@ -89,27 +90,43 @@ int main(int argc, char *argv[]) {
     }
     Color color(100, 0, 255);
     Color bg_color(0, 0, 0);
-    const char *bdf_font_file = NULL;
+
+    const char *bdf_font_file_small = NULL;
+    const char *bdf_font_file_large = NULL;
 
     int opt;
-    while ((opt = getopt(argc, argv, "x:y:f:C:B:O:s:S:d:")) != -1) {
+    while ((opt = getopt(argc, argv, "f:F")) != -1) {
         switch (opt) {
         case 'f':
-            bdf_font_file = strdup(optarg);
+            bdf_font_file_small = strdup(optarg);
+            break;
+        case 'F':
+            bdf_font_file_large = strdup(optarg);
             break;
         default:
             return usage(argv[0]);
         }
     }
 
-    if (bdf_font_file == NULL) {
-        fprintf(stderr, "Need to specify BDF font-file with -f\n");
+    if (bdf_font_file_small == NULL) {
+        fprintf(stderr, "Need to specify a 5x8 BDF font-file with -f\n");
         return usage(argv[0]);
     }
 
-    rgb_matrix::Font font;
-    if (!font.LoadFont(bdf_font_file)) {
-        fprintf(stderr, "Couldn't load font '%s'\n", bdf_font_file);
+    if (bdf_font_file_large == NULL) {
+        fprintf(stderr, "Need to specify a 6x12 BDF font-file with -F\n");
+        return usage(argv[0]);
+    }
+
+    rgb_matrix::Font font_small;
+    if (!font_small.LoadFont(bdf_font_file_small)) {
+        fprintf(stderr, "Couldn't load font '%s'\n", bdf_font_file_small);
+        return 1;
+    }
+
+    rgb_matrix::Font font_large;
+    if (!font_large.LoadFont(bdf_font_file_large)) {
+        fprintf(stderr, "Couldn't load font '%s'\n", bdf_font_file_large);
         return 1;
     }
 
@@ -146,8 +163,9 @@ int main(int argc, char *argv[]) {
                 std::string line = std::format("{:<3} {:<13} {:>3}", line_name,
                                                direction, "N/A");
 
-                rgb_matrix::DrawText(offscreen, font, 0,
-                                     0 + (i + 1) * font.baseline() + i * 4,
+                rgb_matrix::DrawText(offscreen, font_large, 0,
+                                     0 + (i + 1) * font_large.baseline() +
+                                         i * 4,
                                      color, NULL, line.c_str(), 0);
                 continue;
             }
@@ -163,9 +181,9 @@ int main(int argc, char *argv[]) {
                 real_time_indicator +
                     (countdown == 0 ? "*" : std::to_string(countdown)));
 
-            rgb_matrix::DrawText(offscreen, font, 0,
-                                 0 + (i + 1) * font.baseline() + i * 4, color,
-                                 NULL, line.c_str(), 0);
+            rgb_matrix::DrawText(offscreen, font_large, 0,
+                                 0 + (i + 1) * font_large.baseline() + i * 4,
+                                 color, NULL, line.c_str(), 0);
 
             if (timetable.trips[i].departures.size() > 1) {
                 std::string str = "";
@@ -178,12 +196,12 @@ int main(int argc, char *argv[]) {
                     str += (", " + s);
                 }
 
-                std::string line = std::format("{:>31}", str);
+                // std::string line = std::format("{:>31}", str);
 
-                rgb_matrix::DrawText(offscreen, font, 0,
-                                     0 + (i + 1) * font.baseline() + i * 4 + 4 +
-                                         font.baseline(),
-                                     color, NULL, line.c_str(), 0);
+                rgb_matrix::DrawText(offscreen, font_small, 0,
+                                     0 + (i + 1) * font_large.baseline() +
+                                         i * 4 + 4 + font_small.baseline(),
+                                     color, NULL, str.c_str(), 0);
             }
         }
 
