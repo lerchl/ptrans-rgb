@@ -81,6 +81,18 @@ inline TimetableDto parse_timetable(const std::string &body) {
     return j.get<TimetableDto>();
 }
 
+std::string real_time_indicator(bool real_time, bool late, bool traffic_jam) {
+    if (traffic_jam) {
+        return "t";
+    } else if (late) {
+        return "l";
+    } else if (real_time) {
+        return "\"";
+    }
+
+    return "";
+}
+
 int main(int argc, char *argv[]) {
     RGBMatrix::Options matrix_options;
     rgb_matrix::RuntimeOptions runtime_opt;
@@ -172,13 +184,12 @@ int main(int argc, char *argv[]) {
 
             int countdown = timetable.trips[i].departures[0].countdown;
             bool real_time = timetable.trips[i].departures[0].real_time;
+            bool late = timetable.trips[i].departures[0].late;
             bool traffic_jam = timetable.trips[i].departures[0].traffic_jam;
-            std::string real_time_indicator =
-                (traffic_jam ? "t" : (real_time ? "\"" : " "));
 
             std::string line = std::format(
                 "{:<3} {:<13} {:>3}", line_name, direction,
-                real_time_indicator +
+                real_time_indicator(real_time, late, traffic_jam) +
                     (countdown == 0 ? "*" : std::to_string(countdown)));
 
             rgb_matrix::DrawText(offscreen, font_large, 0,
@@ -190,18 +201,22 @@ int main(int argc, char *argv[]) {
 
                 for (auto &&s :
                      timetable.trips[i].departures | std::views::drop(1) |
+                         std::views::take(3) |
                          std::views::transform([](DepartureDto &departure) {
-                             return std::to_string(departure.countdown);
+                             return real_time_indicator(departure.real_time,
+                                                        departure.late,
+                                                        departure.traffic_jam) +
+                                    std::to_string(departure.countdown);
                          })) {
-                    str += (", " + s);
+                    str += ((str.length() == 0 ? "" : ", ") + s);
                 }
 
-                // std::string line = std::format("{:>31}", str);
+                std::string line = std::format("{:>31}", str);
 
                 rgb_matrix::DrawText(offscreen, font_small, 0,
                                      0 + (i + 1) * font_large.baseline() +
                                          i * 4 + 4 + font_small.baseline(),
-                                     color, NULL, str.c_str(), 0);
+                                     color, NULL, line.c_str(), 0);
             }
         }
 
