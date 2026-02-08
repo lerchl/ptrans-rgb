@@ -231,9 +231,9 @@ void ptrans_job() {
                                      error.message)
                       << std::endl;
         }
-    }
 
-    std::this_thread::sleep_for(std::chrono::seconds(30));
+        std::this_thread::sleep_for(std::chrono::seconds(30));
+    }
 }
 
 std::string real_time_indicator(bool real_time, bool late, bool traffic_jam) {
