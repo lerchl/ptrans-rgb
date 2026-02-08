@@ -20,7 +20,7 @@ build_folder:
 	mkdir build
 
 dev: $(RGB_LIBRARY) build_folder
-	$(CXX) $(CXXFLAGS) src/main.cpp -O0 -g -fsanitize=address -o build/ptrans-rgb -isystem $(HTTP_LIB_DIR) -isystem $(JSON_LIB_DIR) -isystem $(RGB_INCDIR) $(LDFLAGS)
+	$(CXX) $(CXXFLAGS) src/main.cpp -O0 -o build/ptrans-rgb -isystem $(HTTP_LIB_DIR) -isystem $(JSON_LIB_DIR) -isystem $(RGB_INCDIR) $(LDFLAGS)
 
 prod: $(RGB_LIBRARY) build_folder
 	$(CXX) $(CXXFLAGS) src/main.cpp -O3 -o build/ptrans-rgb -isystem $(HTTP_LIB_DIR) -isystem $(JSON_LIB_DIR) -isystem $(RGB_INCDIR) $(LDFLAGS)
