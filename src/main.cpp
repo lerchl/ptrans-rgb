@@ -81,14 +81,22 @@ inline void from_json(const json &j, TextDto &t) {
 }
 
 void http_server() {
-    server.Get("/mode",
-               [](const httplib::Request &req, httplib::Response &res) {
-                   (void)req;
-                   ModeDto dto{.mode = mode.load()};
-                   json j = dto;
-                   res.status = 200;
-                   res.set_content(j.dump(), "application/json");
-               });
+    server.set_default_headers({
+        {"Access-Control-Allow-Origin", "*"},
+        {"Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS"},
+        {"Access-Control-Allow-Headers", "Content-Type"},
+    });
+
+    server.Options(".*", [](const httplib::Request &, httplib::Response &res) {
+        res.status = 204;
+    });
+
+    server.Get("/mode", [](const httplib::Request &, httplib::Response &res) {
+        ModeDto dto{.mode = mode.load()};
+        json j = dto;
+        res.status = 200;
+        res.set_content(j.dump(), "application/json");
+    });
     server.Post(
         "/mode", [](const httplib::Request &req, httplib::Response &res) {
             try {
@@ -101,8 +109,7 @@ void http_server() {
         });
 
     server.Get("/brightness",
-               [](const httplib::Request &req, httplib::Response &res) {
-                   (void)req;
+               [](const httplib::Request &, httplib::Response &res) {
                    BrightnessDto dto{.brightness = brightness.load()};
                    json j = dto;
                    res.status = 200;
