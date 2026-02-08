@@ -219,13 +219,19 @@ void ptrans_job() {
                 std::make_shared<TimetableDto>(parse_timetable(result->body)),
                 std::memory_order_release);
         } else {
-            ErrorDto error = parse_error(result->body);
             std::string formatted_time =
                 std::format("{0:%F_%T}", std::chrono::system_clock::now());
-            std::cerr << std::format("{} - {} Could not fetch timetable: {}",
-                                     formatted_time, result->status,
-                                     error.message)
-                      << std::endl;
+            try {
+                ErrorDto error = parse_error(result->body);
+                std::cerr << std::format(
+                                 "{} - {} Could not fetch timetable: {}",
+                                 formatted_time, result->status, error.message)
+                          << std::endl;
+            } catch (const json::parse_error &e) {
+                std::cerr << std::format("{} - {} Could not fetch timetable",
+                                         formatted_time, result->status)
+                          << std::endl;
+            }
         }
 
         std::this_thread::sleep_for(std::chrono::seconds(30));
