@@ -204,22 +204,26 @@ std::atomic<std::shared_ptr<TimetableDto>> timetable;
 
 void ptrans_job() {
     httplib::Client cli("10.0.0.164:3000");
-    auto result = cli.Get("/timetable");
 
-    if (result && result->status == 200) {
-        timetable.store(
-            std::make_shared<TimetableDto>(parse_timetable(result->body)),
-            std::memory_order_release);
-    } else {
-        ErrorDto error = parse_error(result->body);
-        std::string formatted_time =
-            std::format("{0:%F_%T}", std::chrono::system_clock::now());
-        std::cerr << std::format("{} - {} Could not fetch timetable: {}",
-                                 formatted_time, result->status, error.message)
-                  << std::endl;
+    for (;;) {
+        auto result = cli.Get("/timetable");
+
+        if (result && result->status == 200) {
+            timetable.store(
+                std::make_shared<TimetableDto>(parse_timetable(result->body)),
+                std::memory_order_release);
+        } else {
+            ErrorDto error = parse_error(result->body);
+            std::string formatted_time =
+                std::format("{0:%F_%T}", std::chrono::system_clock::now());
+            std::cerr << std::format("{} - {} Could not fetch timetable: {}",
+                                     formatted_time, result->status,
+                                     error.message)
+                      << std::endl;
+        }
+
+        std::this_thread::sleep_for(std::chrono::seconds(30));
     }
-
-    std::this_thread::sleep_for(std::chrono::seconds(30));
 }
 
 std::string real_time_indicator(bool real_time, bool late, bool traffic_jam) {
