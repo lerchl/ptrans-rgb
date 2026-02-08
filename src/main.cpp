@@ -306,6 +306,7 @@ int main(int argc, char *argv[]) {
     signal(SIGINT, interrupt_handler);
 
     http_thread = std::thread(http_server);
+    ptrans_thread = std::thread(ptrans_job);
 
     for (;;) {
         int y_next_line = font_large.baseline();
