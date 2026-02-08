@@ -3,14 +3,12 @@
 
 #include <atomic>
 #include <cstdlib>
-#include <exception>
 #include <getopt.h>
 #include <httplib.h>
 #include <iostream>
+#include <memory>
 #include <nlohmann/json.hpp>
-#include <ranges>
 #include <signal.h>
-#include <stdexcept>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,17 +18,23 @@
 
 using json = nlohmann::json;
 
+enum Mode { PTRANS, TEXT };
+
 rgb_matrix::RGBMatrix *matrix;
 httplib::Server server;
 std::thread http_thread;
+std::thread ptrans_thread;
 
+std::atomic<Mode> mode{PTRANS};
 std::atomic<int> brightness{80};
+std::atomic<std::shared_ptr<std::string>> text;
 
 static void interrupt_handler(int signo) {
     (void)signo;
     delete matrix;
     server.stop();
     http_thread.join();
+    ptrans_thread.join();
     std::cout << std::endl;
     exit(0);
 }
@@ -46,15 +50,57 @@ static int usage(const char *progname) {
     return 1;
 }
 
+struct ModeDto {
+    Mode mode;
+};
+
+inline void to_json(json &j, const ModeDto &m) { j = json{{"mode", m.mode}}; }
+
+inline void from_json(const json &j, ModeDto &m) {
+    m.mode = j.at("mode").get<Mode>();
+}
+
 struct BrightnessDto {
     int brightness;
 };
+
+inline void to_json(json &j, const BrightnessDto &b) {
+    j = json{{"brightness", b.brightness}};
+}
 
 inline void from_json(const json &j, BrightnessDto &b) {
     b.brightness = j.at("brightness").get<int>();
 }
 
-void start_http_server() {
+void http_server() {
+    server.Get("/mode",
+               [](const httplib::Request &req, httplib::Response &res) {
+                   (void)req;
+                   ModeDto dto{.mode = mode.load()};
+                   json j = dto;
+                   res.status = 200;
+                   res.set_content(j.dump(), "application/json");
+               });
+    server.Post(
+        "/mode", [](const httplib::Request &req, httplib::Response &res) {
+            try {
+                Mode new_mode = json::parse(req.body).get<ModeDto>().mode;
+                mode.store(new_mode);
+                res.status = 200;
+            } catch (const json::parse_error &e) {
+                res.status = 400;
+            }
+        });
+
+    server.Get("/brightness",
+               [](const httplib::Request &req, httplib::Response &res) {
+                   (void)req;
+                   BrightnessDto dto{.brightness = brightness.load()};
+                   json j = dto;
+                   res.status = 200;
+                   res.set_content(j.dump(), "application/json");
+               });
+
     server.Post(
         "/brightness", [](const httplib::Request &req, httplib::Response &res) {
             try {
@@ -119,6 +165,41 @@ inline void from_json(const json &j, TimetableDto &tt) {
 inline TimetableDto parse_timetable(const std::string &body) {
     json j = json::parse(body);
     return j.get<TimetableDto>();
+}
+
+struct ErrorDto {
+    std::string message;
+};
+
+inline void from_json(const json &j, ErrorDto &e) {
+    e.message = j.at("message").get<std::string>();
+}
+
+inline ErrorDto parse_error(const std::string &body) {
+    json j = json::parse(body);
+    return j.get<ErrorDto>();
+}
+
+std::atomic<std::shared_ptr<TimetableDto>> timetable;
+
+void ptrans_job() {
+    httplib::Client cli("10.0.0.164:3000");
+    auto result = cli.Get("/timetable");
+
+    if (result && result->status == 200) {
+        timetable.store(
+            std::make_shared<TimetableDto>(parse_timetable(result->body)),
+            std::memory_order_release);
+    } else {
+        ErrorDto error = parse_error(result->body);
+        std::string formatted_time =
+            std::format("{0:%F_%T}", std::chrono::system_clock::now());
+        std::cerr << std::format("{} - {} Could not fetch timetable: {}",
+                                 formatted_time, result->status, error.message)
+                  << std::endl;
+    }
+
+    std::this_thread::sleep_for(std::chrono::seconds(30));
 }
 
 std::string real_time_indicator(bool real_time, bool late, bool traffic_jam) {
@@ -204,75 +285,84 @@ int main(int argc, char *argv[]) {
     signal(SIGTERM, interrupt_handler);
     signal(SIGINT, interrupt_handler);
 
-    http_thread = std::thread(start_http_server);
-
-    httplib::Client cli("10.0.0.164:3000");
+    http_thread = std::thread(http_server);
 
     for (;;) {
-        matrix->SetBrightness(brightness);
-        TimetableDto timetable;
-        auto result = cli.Get("/timetable");
-
-        if (result && result->status == 200) {
-            timetable = parse_timetable(result->body);
-        } else {
-            std::cerr << "Failed to fetch timetable" << std::endl;
-            std::this_thread::sleep_for(std::chrono::seconds(30));
-            continue;
-        }
-
-        offscreen->Fill(bg_color.r, bg_color.g, bg_color.b);
         int y_next_line = font_large.baseline();
 
-        for (int i : std::views::iota(0, (int)timetable.trips.size())) {
-            std::string line_name = timetable.trips[i].line;
-            std::string direction = timetable.trips[i].direction;
+        matrix->SetBrightness(brightness.load());
+        offscreen->Fill(bg_color.r, bg_color.g, bg_color.b);
 
-            if (timetable.trips[i].departures.empty()) {
-                std::string line = std::format("{:<3} {:<13} {:>3}", line_name,
-                                               direction, "N/A");
+        if (mode == TEXT) {
 
-                y_next_line = write_line(offscreen, font_large, y_next_line,
-                                         fg_color_default, line);
-                continue;
-            }
+        } else if (mode == PTRANS) {
+            auto tt = timetable.load(std::memory_order_acquire);
 
-            int countdown = timetable.trips[i].departures[0].countdown;
-            bool real_time = timetable.trips[i].departures[0].real_time;
-            bool late = timetable.trips[i].departures[0].late;
-            bool traffic_jam = timetable.trips[i].departures[0].traffic_jam;
-
-            std::string line = std::format(
-                "{:<3} {:<13} {:>3}", line_name, direction,
-                real_time_indicator(real_time, late, traffic_jam) +
-                    (countdown == 0 ? "*" : std::to_string(countdown)));
-
-            y_next_line = write_line(offscreen, font_large, y_next_line,
-                                     fg_color_default, line);
-
-            if (timetable.trips[i].departures.size() > 1) {
-                std::string str = "";
-
-                for (auto &&s :
-                     timetable.trips[i].departures | std::views::drop(1) |
-                         std::views::take(3) |
-                         std::views::transform([](DepartureDto &departure) {
-                             return real_time_indicator(departure.real_time,
-                                                        departure.late,
-                                                        departure.traffic_jam) +
-                                    std::to_string(departure.countdown);
-                         })) {
-                    str += ((str.length() == 0 ? "" : ", ") + s);
-                }
-
+            if (!tt) {
                 y_next_line =
-                    write_line(offscreen, font_small, y_next_line,
-                               fg_color_default, std::format("{:>25}", str));
+                    write_line(offscreen, font_large, y_next_line,
+                               fg_color_default, "No timetable available...");
+            } else {
+                for (int i : std::views::iota(0, (int)tt->trips.size())) {
+                    std::string line_name = tt->trips[i].line;
+                    std::string direction = tt->trips[i].direction;
+
+                    if (tt->trips[i].departures.empty()) {
+                        std::string line = std::format(
+                            "{:<3} {:<13} {:>3}", line_name, direction, "N/A");
+
+                        y_next_line =
+                            write_line(offscreen, font_large, y_next_line,
+                                       fg_color_default, line);
+                        continue;
+                    }
+
+                    int countdown = tt->trips[i].departures[0].countdown;
+                    bool real_time = tt->trips[i].departures[0].real_time;
+                    bool late = tt->trips[i].departures[0].late;
+                    bool traffic_jam = tt->trips[i].departures[0].traffic_jam;
+
+                    std::string line = std::format(
+                        "{:<3} {:<13} {:>3}", line_name, direction,
+                        real_time_indicator(real_time, late, traffic_jam) +
+                            (countdown == 0 ? "*" : std::to_string(countdown)));
+
+                    y_next_line = write_line(offscreen, font_large, y_next_line,
+                                             fg_color_default, line);
+
+                    if (tt->trips[i].departures.size() > 1) {
+                        std::string str = "";
+
+                        for (auto &&s :
+                             tt->trips[i].departures | std::views::drop(1) |
+                                 std::views::take(3) |
+                                 std::views::transform(
+                                     [](DepartureDto &departure) {
+                                         return real_time_indicator(
+                                                    departure.real_time,
+                                                    departure.late,
+                                                    departure.traffic_jam) +
+                                                std::to_string(
+                                                    departure.countdown);
+                                     })) {
+                            str += ((str.length() == 0 ? "" : ", ") + s);
+                        }
+
+                        y_next_line = write_line(offscreen, font_small,
+                                                 y_next_line, fg_color_default,
+                                                 std::format("{:>25}", str));
+                    }
+                }
             }
+        } else {
+            std::string headline = "No mode set!";
+            std::string text = "POST /mode { \"mode\": 0 (ptrans) | 1 (text) }";
+            y_next_line = write_line(offscreen, font_large, y_next_line,
+                                     fg_color_default, headline);
+            y_next_line = write_line(offscreen, font_small, y_next_line,
+                                     fg_color_default, text);
         }
 
-        // Atomic swap with double buffer
         offscreen = matrix->SwapOnVSync(offscreen);
-        std::this_thread::sleep_for(std::chrono::seconds(30));
     }
 }
