@@ -27,7 +27,7 @@ std::thread ptrans_thread;
 
 std::atomic<Mode> mode{PTRANS};
 std::atomic<int> brightness{80};
-std::atomic<std::shared_ptr<std::string>> text;
+std::atomic<std::shared_ptr<const std::string>> text;
 
 static void interrupt_handler(int signo) {
     (void)signo;
@@ -70,6 +70,14 @@ inline void to_json(json &j, const BrightnessDto &b) {
 
 inline void from_json(const json &j, BrightnessDto &b) {
     b.brightness = j.at("brightness").get<int>();
+}
+
+struct TextDto {
+    std::string text;
+};
+
+inline void from_json(const json &j, TextDto &t) {
+    t.text = j.at("text").get<std::string>();
 }
 
 void http_server() {
@@ -118,6 +126,18 @@ void http_server() {
                 res.status = 400;
             }
         });
+
+    server.Post("/text",
+                [](const httplib::Request &req, httplib::Response &res) {
+                    try {
+                        auto new_text = std::make_shared<std::string>(
+                            json::parse(req.body).get<TextDto>().text);
+                        text.store(new_text, std::memory_order_release);
+                        res.status = 200;
+                    } catch (const json::parse_error &e) {
+                        res.status = 400;
+                    }
+                });
 
     server.listen("0.0.0.0", 8080);
 }
@@ -294,14 +314,35 @@ int main(int argc, char *argv[]) {
         offscreen->Fill(bg_color.r, bg_color.g, bg_color.b);
 
         if (mode == TEXT) {
+            auto t = text.load(std::memory_order_acquire);
 
+            if (!t) {
+                std::string headline = "No text set!";
+                std::string text1 = "POST /text";
+                std::string text2 = "{";
+                std::string text3 = "  \"text\": \"Hello world!\"";
+                std::string text4 = "}";
+                y_next_line = write_line(offscreen, font_large, y_next_line,
+                                         fg_color_default, headline);
+                y_next_line = write_line(offscreen, font_small, y_next_line,
+                                         fg_color_default, text1);
+                y_next_line = write_line(offscreen, font_small, y_next_line,
+                                         fg_color_default, text2);
+                y_next_line = write_line(offscreen, font_small, y_next_line,
+                                         fg_color_default, text3);
+                y_next_line = write_line(offscreen, font_small, y_next_line,
+                                         fg_color_default, text4);
+            } else {
+                y_next_line = write_line(offscreen, font_large, y_next_line,
+                                         fg_color_default, *t);
+            }
         } else if (mode == PTRANS) {
             auto tt = timetable.load(std::memory_order_acquire);
 
             if (!tt) {
                 y_next_line =
                     write_line(offscreen, font_large, y_next_line,
-                               fg_color_default, "No timetable available...");
+                               fg_color_default, "No timetable available");
             } else {
                 for (int i : std::views::iota(0, (int)tt->trips.size())) {
                     std::string line_name = tt->trips[i].line;
@@ -356,11 +397,20 @@ int main(int argc, char *argv[]) {
             }
         } else {
             std::string headline = "No mode set!";
-            std::string text = "POST /mode { \"mode\": 0 (ptrans) | 1 (text) }";
+            std::string text1 = "POST /mode";
+            std::string text2 = "{";
+            std::string text3 = "  \"mode\": 0 (ptrans) | 1 (text)";
+            std::string text4 = "}";
             y_next_line = write_line(offscreen, font_large, y_next_line,
                                      fg_color_default, headline);
             y_next_line = write_line(offscreen, font_small, y_next_line,
-                                     fg_color_default, text);
+                                     fg_color_default, text1);
+            y_next_line = write_line(offscreen, font_small, y_next_line,
+                                     fg_color_default, text2);
+            y_next_line = write_line(offscreen, font_small, y_next_line,
+                                     fg_color_default, text3);
+            y_next_line = write_line(offscreen, font_small, y_next_line,
+                                     fg_color_default, text4);
         }
 
         offscreen = matrix->SwapOnVSync(offscreen);
