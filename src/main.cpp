@@ -217,8 +217,8 @@ void ptrans_job() {
             std::format("{0:%F_%T}", std::chrono::system_clock::now());
 
         if (!result) {
-            std::cerr << std::format("{} - {} Could not fetch timetable",
-                                     formatted_time, result->status)
+            std::cerr << std::format("{} - Could not reach ptrans-data",
+                                     formatted_time)
                       << std::endl;
         } else if (result->status == 200) {
             timetable.store(
