@@ -29,8 +29,7 @@ std::atomic<Mode> mode{PTRANS};
 std::atomic<int> brightness{80};
 std::atomic<std::shared_ptr<const std::string>> text;
 
-static void interrupt_handler(int signo) {
-    (void)signo;
+static void interrupt_handler(int) {
     delete matrix;
     server.stop();
     http_thread.join();
