@@ -79,6 +79,8 @@ inline void from_json(const json &j, TextDto &t) {
     t.text = j.at("text").get<std::string>();
 }
 
+inline void to_json(json &j, const TextDto &t) { j = json{{"text", t.text}}; }
+
 void http_server() {
     server.set_default_headers({
         {"Access-Control-Allow-Origin", "*"},
@@ -91,7 +93,7 @@ void http_server() {
     });
 
     server.Get("/mode", [](const httplib::Request &, httplib::Response &res) {
-        ModeDto dto{.mode = mode.load()};
+        ModeDto dto{.mode = mode.load(std::memory_order_acquire)};
         json j = dto;
         res.status = 200;
         res.set_content(j.dump(), "application/json");
@@ -107,13 +109,14 @@ void http_server() {
             }
         });
 
-    server.Get("/brightness",
-               [](const httplib::Request &, httplib::Response &res) {
-                   BrightnessDto dto{.brightness = brightness.load()};
-                   json j = dto;
-                   res.status = 200;
-                   res.set_content(j.dump(), "application/json");
-               });
+    server.Get(
+        "/brightness", [](const httplib::Request &, httplib::Response &res) {
+            BrightnessDto dto{.brightness =
+                                  brightness.load(std::memory_order_acquire)};
+            json j = dto;
+            res.status = 200;
+            res.set_content(j.dump(), "application/json");
+        });
 
     server.Post(
         "/brightness", [](const httplib::Request &req, httplib::Response &res) {
@@ -132,6 +135,13 @@ void http_server() {
                 res.status = 400;
             }
         });
+
+    server.Get("/text", [](const httplib::Request &, httplib::Response &res) {
+        TextDto dto{.text = *text.load(std::memory_order_acquire)};
+        json j = dto;
+        res.status = 200;
+        res.set_content(j.dump(), "application/json");
+    });
 
     server.Post("/text",
                 [](const httplib::Request &req, httplib::Response &res) {
@@ -325,7 +335,7 @@ int main(int argc, char *argv[]) {
     for (;;) {
         int y_next_line = font_large.baseline();
 
-        matrix->SetBrightness(brightness.load());
+        matrix->SetBrightness(brightness.load(std::memory_order_acquire));
         offscreen->Fill(bg_color.r, bg_color.g, bg_color.b);
 
         if (mode == TEXT) {
