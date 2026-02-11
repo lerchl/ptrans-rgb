@@ -98,12 +98,13 @@ void http_server() {
         res.status = 200;
         res.set_content(j.dump(), "application/json");
     });
+
     server.Post(
         "/mode", [](const httplib::Request &req, httplib::Response &res) {
             try {
                 Mode new_mode = json::parse(req.body).get<ModeDto>().mode;
                 mode.store(new_mode);
-                res.status = 200;
+                res.status = 204;
             } catch (const json::parse_error &e) {
                 res.status = 400;
             }
@@ -130,7 +131,7 @@ void http_server() {
                 }
 
                 brightness.store(new_brightness);
-                res.status = 200;
+                res.status = 204;
             } catch (const json::parse_error &e) {
                 res.status = 400;
             }
@@ -153,7 +154,7 @@ void http_server() {
                         auto new_text = std::make_shared<std::string>(
                             json::parse(req.body).get<TextDto>().text);
                         text.store(new_text, std::memory_order_release);
-                        res.status = 200;
+                        res.status = 204;
                     } catch (const json::parse_error &e) {
                         res.status = 400;
                     }
