@@ -137,10 +137,14 @@ void http_server() {
         });
 
     server.Get("/text", [](const httplib::Request &, httplib::Response &res) {
-        TextDto dto{.text = *text.load(std::memory_order_acquire)};
-        json j = dto;
-        res.status = 200;
-        res.set_content(j.dump(), "application/json");
+        if (auto t = text.load(std::memory_order_acquire)) {
+            TextDto dto{.text = *t};
+            json j = dto;
+            res.status = 200;
+            res.set_content(j.dump(), "application/json");
+        } else {
+            res.status = 204;
+        }
     });
 
     server.Post("/text",
