@@ -42,9 +42,13 @@ static int usage(const char *progname) {
     fprintf(stderr, "usage: %s [options]\n", progname);
     fprintf(stderr, "Options:\n");
     fprintf(stderr,
-            "\t-f <font-file>    : Use given font for small text (5x8).\n");
+            "\t-p <port>        : Port to listen on.\n");
     fprintf(stderr,
-            "\t-F <font-file>    : Use given font for large text (6x12).\n");
+            "\t-d <data url>    : URL to ptrans-data.\n");
+    fprintf(stderr,
+            "\t-f <font-file>   : Use given font for small text (5x8).\n");
+    fprintf(stderr,
+            "\t-F <font-file>   : Use given font for large text (6x12).\n");
     rgb_matrix::PrintMatrixFlags(stderr);
     return 1;
 }
@@ -81,7 +85,7 @@ inline void from_json(const json &j, TextDto &t) {
 
 inline void to_json(json &j, const TextDto &t) { j = json{{"text", t.text}}; }
 
-void http_server() {
+void http_server(const int &port) {
     server.set_default_headers({
         {"Access-Control-Allow-Origin", "*"},
         {"Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS"},
@@ -160,7 +164,7 @@ void http_server() {
                     }
                 });
 
-    server.listen("0.0.0.0", 8080);
+    server.listen("0.0.0.0", port);
 }
 
 struct DepartureDto {
@@ -223,8 +227,8 @@ inline ErrorDto parse_error(const std::string &body) {
 
 std::atomic<std::shared_ptr<TimetableDto>> timetable;
 
-void ptrans_job() {
-    httplib::Client cli("10.0.0.164:3000");
+void ptrans_job(const std::string &data_url) {
+    httplib::Client cli(data_url);
 
     for (;;) {
         auto result = cli.Get("/timetable");
@@ -284,12 +288,20 @@ int main(int argc, char *argv[]) {
     rgb_matrix::Color fg_color_late(255, 0, 0);
     rgb_matrix::Color bg_color(0, 0, 0);
 
+    int port = 0;
+    std::string data_url = "";
     const char *bdf_font_file_small = NULL;
     const char *bdf_font_file_large = NULL;
 
     int opt;
-    while ((opt = getopt(argc, argv, "f:F:")) != -1) {
+    while ((opt = getopt(argc, argv, "p:d:f:F:")) != -1) {
         switch (opt) {
+        case 'p':
+            port = std::stoi(optarg);
+            break;
+        case 'd':
+            data_url = std::string(optarg);
+            break;
         case 'f':
             bdf_font_file_small = strdup(optarg);
             break;
@@ -334,8 +346,8 @@ int main(int argc, char *argv[]) {
     signal(SIGTERM, interrupt_handler);
     signal(SIGINT, interrupt_handler);
 
-    http_thread = std::thread(http_server);
-    ptrans_thread = std::thread(ptrans_job);
+    http_thread = std::thread([&port]() { http_server(port); });
+    ptrans_thread = std::thread([&data_url]() { ptrans_job(data_url); });
 
     for (;;) {
         int y_next_line = font_large.baseline();
