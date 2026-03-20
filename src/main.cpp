@@ -1,3 +1,5 @@
+#define CPPHTTPLIB_OPENSSL_SUPPORT
+
 #include "graphics.h"
 #include "led-matrix.h"
 
@@ -42,13 +44,13 @@ static int usage(const char *progname) {
     fprintf(stderr, "usage: %s [options]\n", progname);
     fprintf(stderr, "Options:\n");
     fprintf(stderr,
-            "\t-p <port>        : Port to listen on.\n");
+            "\t-p <port>            : Port to listen on.\n");
     fprintf(stderr,
-            "\t-d <data url>    : URL to ptrans-data.\n");
+            "\t-d <data url>        : URL to ptrans-data.\n");
     fprintf(stderr,
-            "\t-f <font-file>   : Use given font for small text (5x8).\n");
+            "\t-f <font-file>       : Use given font for small text (5x8).\n");
     fprintf(stderr,
-            "\t-F <font-file>   : Use given font for large text (6x12).\n");
+            "\t-F <font-file>       : Use given font for large text (6x12).\n");
     rgb_matrix::PrintMatrixFlags(stderr);
     return 1;
 }
