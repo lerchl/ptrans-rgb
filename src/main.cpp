@@ -1,5 +1,3 @@
-#define CPPHTTPLIB_OPENSSL_SUPPORT
-
 #include "graphics.h"
 #include "led-matrix.h"
 
