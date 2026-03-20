@@ -29,7 +29,7 @@ jobs:
           echo "VERSION=$VERSION" >> $GITHUB_ENV
 
       - name: Build
-        run: make prod CXX=g++-13
+        run: make prod CXX=g++-13 CC=gcc-13
 
       - name: Create GitHub Release and upload binary
         uses: softprops/action-gh-release@v2
