@@ -17,6 +17,10 @@
 #include <time.h>
 #include <vector>
 
+#ifndef APP_VERSION
+#define APP_VERSION "unknown"
+#endif
+
 using json = nlohmann::json;
 
 enum Mode { PTRANS, TEXT };
@@ -103,6 +107,13 @@ void http_server(const int &port) {
     server.Options(".*", [](const httplib::Request &, httplib::Response &res) {
         res.status = 204;
     });
+
+    server.Get("/version",
+               [](const httplib::Request &, httplib::Response &res) {
+                   json j = {{"version", APP_VERSION}};
+                   res.status = 200;
+                   res.set_content(j.dump(), "application/json");
+               });
 
     server.Get("/mode", [](const httplib::Request &, httplib::Response &res) {
         ModeDto dto{.mode = mode.load(std::memory_order_acquire)};
