@@ -21,6 +21,10 @@ using json = nlohmann::json;
 
 enum Mode { PTRANS, TEXT };
 
+std::condition_variable cv;
+std::mutex cv_mutex;
+std::atomic<bool> running{true};
+
 rgb_matrix::RGBMatrix *matrix;
 httplib::Server server;
 std::thread http_thread;
@@ -31,10 +35,15 @@ std::atomic<int> brightness{80};
 std::atomic<std::shared_ptr<const std::string>> text;
 
 static void interrupt_handler(int) {
-    delete matrix;
+    running = false;
+    cv.notify_all();
+
     server.stop();
     http_thread.join();
     ptrans_thread.join();
+
+    delete matrix;
+
     std::cout << std::endl;
     exit(0);
 }
@@ -229,7 +238,7 @@ std::atomic<std::shared_ptr<TimetableDto>> timetable;
 void ptrans_job(const std::string &data_url) {
     httplib::Client cli(data_url);
 
-    for (;;) {
+    while (running) {
         auto result = cli.Get("/timetable");
         std::string formatted_time =
             std::format("{0:%F_%T}", std::chrono::system_clock::now());
@@ -250,7 +259,9 @@ void ptrans_job(const std::string &data_url) {
                       << std::endl;
         }
 
-        std::this_thread::sleep_for(std::chrono::seconds(30));
+        std::unique_lock<std::mutex> lock(cv_mutex);
+        cv.wait_for(lock, std::chrono::seconds(30),
+                    [] { return !running.load(); });
     }
 }
 
