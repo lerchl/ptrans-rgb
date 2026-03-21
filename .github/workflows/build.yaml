@@ -28,13 +28,6 @@ jobs:
           VERSION=$(grep -m1 "VERSION" Makefile | sed "s/.*= *//")
           echo "VERSION=$VERSION" >> $GITHUB_ENV
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ env.VERSION }}
-          name: v${{ env.VERSION }}
-          make_latest: true
-
       - name: Build
         run: make prod CXX=g++-13 CC=gcc-13
 
@@ -42,8 +35,10 @@ jobs:
         run: |
           cp build/ptrans-rgb ptrans-rgb-linux-aarch64
 
-      - name: Add binary to GitHub Release
+      - name: Create GitHub Release and upload binary
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ env.VERSION }}
+          name: v${{ env.VERSION }}
           files: ptrans-rgb-linux-aarch64
+          make_latest: true
