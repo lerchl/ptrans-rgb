@@ -2,6 +2,7 @@
 #include "led-matrix.h"
 
 #include <atomic>
+#include <cstddef>
 #include <cstdlib>
 #include <getopt.h>
 #include <httplib.h>
@@ -41,10 +42,8 @@ static void interrupt_handler(int) {
 static int usage(const char *progname) {
     fprintf(stderr, "usage: %s [options]\n", progname);
     fprintf(stderr, "Options:\n");
-    fprintf(stderr,
-            "\t-p <port>            : Port to listen on.\n");
-    fprintf(stderr,
-            "\t-d <data url>        : URL to ptrans-data.\n");
+    fprintf(stderr, "\t-p <port>            : Port to listen on.\n");
+    fprintf(stderr, "\t-d <data url>        : URL to ptrans-data.\n");
     fprintf(stderr,
             "\t-f <font-file>       : Use given font for small text (5x8).\n");
     fprintf(stderr,
@@ -267,6 +266,16 @@ std::string real_time_indicator(bool real_time, bool late, bool traffic_jam) {
     return "";
 }
 
+std::string pad_utf8(const std::string &s, size_t width) {
+    // Count codepoints (not bytes)
+    size_t codepoints = 0;
+    for (unsigned char c : s)
+        if ((c & 0xC0) != 0x80)
+            codepoints++; // skip continuation bytes
+    size_t padding = (codepoints < width) ? width - codepoints : 0;
+    return s + std::string(padding, ' ');
+}
+
 int write_line(rgb_matrix::FrameCanvas *canvas, rgb_matrix::Font &font, int y,
                rgb_matrix::Color color, std::string text) {
     rgb_matrix::DrawText(canvas, font, 0, y, color, NULL, text.c_str(), 0);
@@ -406,7 +415,7 @@ int main(int argc, char *argv[]) {
                     bool traffic_jam = tt->trips[i].departures[0].traffic_jam;
 
                     std::string line = std::format(
-                        "{:<3} {:<13} {:>3}", line_name, direction,
+                        "{:<3} {} {:>3}", line_name, pad_utf8(direction, 13),
                         real_time_indicator(real_time, late, traffic_jam) +
                             (countdown == 0 ? "*" : std::to_string(countdown)));
 
