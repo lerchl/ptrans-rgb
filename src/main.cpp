@@ -2,6 +2,7 @@
 #include "led-matrix.h"
 
 #include <atomic>
+#include <cstddef>
 #include <cstdlib>
 #include <getopt.h>
 #include <httplib.h>
@@ -16,9 +17,17 @@
 #include <time.h>
 #include <vector>
 
+#ifndef BUILD
+#define BUILD "unknown"
+#endif
+
 using json = nlohmann::json;
 
 enum Mode { PTRANS, TEXT };
+
+std::condition_variable cv;
+std::mutex cv_mutex;
+std::atomic<bool> running{true};
 
 rgb_matrix::RGBMatrix *matrix;
 httplib::Server server;
@@ -30,10 +39,15 @@ std::atomic<int> brightness{80};
 std::atomic<std::shared_ptr<const std::string>> text;
 
 static void interrupt_handler(int) {
-    delete matrix;
+    running = false;
+    cv.notify_all();
+
     server.stop();
     http_thread.join();
     ptrans_thread.join();
+
+    delete matrix;
+
     std::cout << std::endl;
     exit(0);
 }
@@ -41,10 +55,8 @@ static void interrupt_handler(int) {
 static int usage(const char *progname) {
     fprintf(stderr, "usage: %s [options]\n", progname);
     fprintf(stderr, "Options:\n");
-    fprintf(stderr,
-            "\t-p <port>            : Port to listen on.\n");
-    fprintf(stderr,
-            "\t-d <data url>        : URL to ptrans-data.\n");
+    fprintf(stderr, "\t-p <port>            : Port to listen on.\n");
+    fprintf(stderr, "\t-d <data url>        : URL to ptrans-data.\n");
     fprintf(stderr,
             "\t-f <font-file>       : Use given font for small text (5x8).\n");
     fprintf(stderr,
@@ -95,6 +107,13 @@ void http_server(const int &port) {
     server.Options(".*", [](const httplib::Request &, httplib::Response &res) {
         res.status = 204;
     });
+
+    server.Get("/version",
+               [](const httplib::Request &, httplib::Response &res) {
+                   json j = {{"version", BUILD}};
+                   res.status = 200;
+                   res.set_content(j.dump(), "application/json");
+               });
 
     server.Get("/mode", [](const httplib::Request &, httplib::Response &res) {
         ModeDto dto{.mode = mode.load(std::memory_order_acquire)};
@@ -230,7 +249,7 @@ std::atomic<std::shared_ptr<TimetableDto>> timetable;
 void ptrans_job(const std::string &data_url) {
     httplib::Client cli(data_url);
 
-    for (;;) {
+    while (running) {
         auto result = cli.Get("/timetable");
         std::string formatted_time =
             std::format("{0:%F_%T}", std::chrono::system_clock::now());
@@ -251,7 +270,9 @@ void ptrans_job(const std::string &data_url) {
                       << std::endl;
         }
 
-        std::this_thread::sleep_for(std::chrono::seconds(30));
+        std::unique_lock<std::mutex> lock(cv_mutex);
+        cv.wait_for(lock, std::chrono::seconds(30),
+                    [] { return !running.load(); });
     }
 }
 
@@ -265,6 +286,16 @@ std::string real_time_indicator(bool real_time, bool late, bool traffic_jam) {
     }
 
     return "";
+}
+
+std::string pad_utf8(const std::string &s, size_t width) {
+    // Count codepoints (not bytes)
+    size_t codepoints = 0;
+    for (unsigned char c : s)
+        if ((c & 0xC0) != 0x80)
+            codepoints++; // skip continuation bytes
+    size_t padding = (codepoints < width) ? width - codepoints : 0;
+    return s + std::string(padding, ' ');
 }
 
 int write_line(rgb_matrix::FrameCanvas *canvas, rgb_matrix::Font &font, int y,
@@ -406,7 +437,7 @@ int main(int argc, char *argv[]) {
                     bool traffic_jam = tt->trips[i].departures[0].traffic_jam;
 
                     std::string line = std::format(
-                        "{:<3} {:<13} {:>3}", line_name, direction,
+                        "{:<3} {} {:>3}", line_name, pad_utf8(direction, 13),
                         real_time_indicator(real_time, late, traffic_jam) +
                             (countdown == 0 ? "*" : std::to_string(countdown)));
 
