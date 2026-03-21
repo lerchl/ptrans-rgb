@@ -33,13 +33,13 @@ jobs:
 
       - name: Rename binary
         run: |
-          cp build/ptrans-rgb ptrans-rgb-aarch64
+          cp build/ptrans-rgb ptrans-rgb-linux-aarch64
 
       - name: Create GitHub Release and upload binary
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ env.VERSION }}
           name: v${{ env.VERSION }}
-          files: ptrans-rgb-aarch64
+          files: ptrans-rgb-linux-aarch64
           make_latest: true
           overwrite: true
