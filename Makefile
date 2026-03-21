@@ -1,4 +1,5 @@
-VERSION := $(shell git describe --tags --always --dirty)
+VERSION=0.1.0
+BUILD := $(shell git describe --tags --always --dirty | sed 's/^v//')
 
 RGB_LIB_DISTRIBUTION=external/rpi-rgb-led-matrix
 RGB_INCDIR=$(RGB_LIB_DISTRIBUTION)/include
@@ -12,7 +13,7 @@ JSON_LIB_DIR=external/json/single_include
 LDFLAGS+=-L $(RGB_LIBDIR) -l$(RGB_LIBRARY_NAME) -lrt -lm -lpthread -lssl -lcrypto
 
 CXX=g++
-CXXFLAGS=-std=c++23 -Wall -Wextra -DAPP_VERSION=\"$(VERSION)\"
+CXXFLAGS=-std=c++23 -Wall -Wextra -DBUILD=\"$(BUILD)\"
 
 $(RGB_LIBRARY):
 	$(MAKE) -C $(RGB_LIBDIR)

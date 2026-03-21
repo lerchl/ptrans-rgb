@@ -17,8 +17,8 @@
 #include <time.h>
 #include <vector>
 
-#ifndef APP_VERSION
-#define APP_VERSION "unknown"
+#ifndef BUILD
+#define BUILD "unknown"
 #endif
 
 using json = nlohmann::json;
@@ -110,7 +110,7 @@ void http_server(const int &port) {
 
     server.Get("/version",
                [](const httplib::Request &, httplib::Response &res) {
-                   json j = {{"version", APP_VERSION}};
+                   json j = {{"version", BUILD}};
                    res.status = 200;
                    res.set_content(j.dump(), "application/json");
                });
