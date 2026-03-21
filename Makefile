@@ -1,4 +1,4 @@
-VERSION=0.2.0
+VERSION=0.2.0a
 BUILD := $(shell git describe --tags --always --dirty | sed 's/^v//')
 
 RGB_LIB_DISTRIBUTION=external/rpi-rgb-led-matrix
