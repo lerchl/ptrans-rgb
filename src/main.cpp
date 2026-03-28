@@ -437,10 +437,19 @@ int main(int argc, char *argv[]) {
                     bool late = tt->trips[i].departures[0].late;
                     bool traffic_jam = tt->trips[i].departures[0].traffic_jam;
 
+                    auto now = std::chrono::steady_clock::now();
+                    auto ms =
+                        std::chrono::duration_cast<std::chrono::milliseconds>(
+                            now.time_since_epoch())
+                            .count();
+                    bool blink_on = (ms / 250) % 2 == 0;
+                    std::string countdown_indicator =
+                        (countdown == 0 ? (blink_on ? "*" : " ") : std::to_string(countdown));
+
                     std::string line = std::format(
                         "{:<3} {} {:>3}", line_name, pad_utf8(direction, 13),
                         real_time_indicator(real_time, late, traffic_jam) +
-                            (countdown == 0 ? "*" : std::to_string(countdown)));
+                            countdown_indicator);
 
                     y_next_line = write_line(offscreen, font_large, y_next_line,
                                              fg_color_default, line);
