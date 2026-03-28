@@ -422,8 +422,9 @@ int main(int argc, char *argv[]) {
                     std::string direction = tt->trips[i].direction;
 
                     if (tt->trips[i].departures.empty()) {
-                        std::string line = std::format(
-                            "{:<3} {:<13} {:>3}", line_name, direction, "N/A");
+                        std::string line =
+                            std::format("{:<3} {} {:>3}", line_name,
+                                        pad_utf8(direction, 13), "N/A");
 
                         y_next_line =
                             write_line(offscreen, font_large, y_next_line,
