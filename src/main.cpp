@@ -393,6 +393,31 @@ int main(int argc, char *argv[]) {
         offscreen->Fill(bg_color.r, bg_color.g, bg_color.b);
 
         if (mode == TEXT) {
+            static const std::string SF_CHARSET =
+                " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.:!?-";
+            static const int CELL_W = 9;
+            static const int CELL_H = 13;
+            static const int CELL_GAP = 1;
+            static const int SF_START_X = 1;
+            static const int SF_START_Y = (64 - CELL_H) / 2;
+            static const int FRAMES_PER_STEP = 6;
+            static const int NUM_CELLS = 128 / (CELL_W + CELL_GAP);
+
+            struct SFCell {
+                int charIndex = 0;
+                char target = ' ';
+                int frame = 0;
+                int stepsLeft = 0;
+                bool flipping = false;
+            };
+
+            static std::vector<SFCell> sf_cells(NUM_CELLS);
+            static std::string sf_last_target = "";
+
+            static rgb_matrix::Color sf_bg = {15, 15, 15};
+            static rgb_matrix::Color sf_fg = {245, 184, 0};
+            static rgb_matrix::Color sf_dim = {120, 90, 0};
+
             auto t = text.load(std::memory_order_acquire);
 
             if (!t) {
@@ -412,8 +437,115 @@ int main(int argc, char *argv[]) {
                 y_next_line = write_line(offscreen, font_small, y_next_line,
                                          fg_color_default, text4);
             } else {
-                y_next_line = write_line(offscreen, font_large, y_next_line,
-                                         fg_color_default, *t);
+                std::string target = t->substr(0, NUM_CELLS);
+                for (auto &c : target)
+                    c = toupper(c);
+                target = target + std::string(NUM_CELLS - target.size(), ' ');
+
+                if (target != sf_last_target) {
+                    sf_last_target = target;
+                    for (int i = 0; i < NUM_CELLS; ++i) {
+                        char ch = target[i];
+                        int ti = (int)SF_CHARSET.find(ch);
+                        if (ti == (int)std::string::npos)
+                            ti = 0;
+                        int steps = (ti - sf_cells[i].charIndex +
+                                     (int)SF_CHARSET.size()) %
+                                    (int)SF_CHARSET.size();
+                        sf_cells[i].target = ch;
+                        sf_cells[i].stepsLeft = steps;
+                        sf_cells[i].frame = 0;
+                        sf_cells[i].flipping = (steps > 0);
+                    }
+                }
+
+                for (int i = 0; i < NUM_CELLS; ++i) {
+                    SFCell &cell = sf_cells[i];
+                    int px = SF_START_X + i * (CELL_W + CELL_GAP);
+                    int midY = SF_START_Y + CELL_H / 2;
+
+                    for (int py = SF_START_Y; py < SF_START_Y + CELL_H; ++py)
+                        for (int ppx = px; ppx < px + CELL_W; ++ppx)
+                            offscreen->SetPixel(ppx, py, sf_bg.r, sf_bg.g,
+                                                sf_bg.b);
+
+                    char cur = SF_CHARSET[cell.charIndex];
+                    char next =
+                        SF_CHARSET[(cell.charIndex + 1) % SF_CHARSET.size()];
+
+                    if (cell.flipping) {
+                        float progress = (float)cell.frame / FRAMES_PER_STEP;
+
+                        if (progress < 0.5f) {
+                            // bottom half: static current char
+                            rgb_matrix::DrawText(offscreen, font_small, px + 2,
+                                                 SF_START_Y + CELL_H - 2,
+                                                 sf_dim, nullptr,
+                                                 std::string(1, cur).c_str());
+                            // blank top half (folding away)
+                            for (int py = SF_START_Y; py < midY; ++py)
+                                for (int ppx = px; ppx < px + CELL_W; ++ppx)
+                                    offscreen->SetPixel(ppx, py, sf_bg.r,
+                                                        sf_bg.g, sf_bg.b);
+                        } else {
+                            // top half: static next char
+                            rgb_matrix::DrawText(offscreen, font_small, px + 2,
+                                                 SF_START_Y + CELL_H - 2,
+                                                 sf_dim, nullptr,
+                                                 std::string(1, next).c_str());
+                            // bottom half: unfolding in
+                            float botScale = (progress - 0.5f) / 0.5f;
+                            int visBottom =
+                                midY + (int)((CELL_H / 2) * botScale);
+                            for (int py = visBottom; py < SF_START_Y + CELL_H;
+                                 ++py)
+                                for (int ppx = px; ppx < px + CELL_W; ++ppx)
+                                    offscreen->SetPixel(ppx, py, sf_bg.r,
+                                                        sf_bg.g, sf_bg.b);
+                            rgb_matrix::DrawText(offscreen, font_small, px + 2,
+                                                 SF_START_Y + CELL_H - 2, sf_fg,
+                                                 nullptr,
+                                                 std::string(1, next).c_str());
+                            for (int py = SF_START_Y; py < midY; ++py)
+                                for (int ppx = px; ppx < px + CELL_W; ++ppx)
+                                    offscreen->SetPixel(ppx, py, sf_bg.r,
+                                                        sf_bg.g, sf_bg.b);
+                        }
+
+                        cell.frame++;
+                        if (cell.frame >= FRAMES_PER_STEP) {
+                            cell.frame = 0;
+                            cell.charIndex =
+                                (cell.charIndex + 1) % (int)SF_CHARSET.size();
+                            cell.stepsLeft--;
+                            if (cell.stepsLeft <= 0) {
+                                cell.charIndex =
+                                    (int)SF_CHARSET.find(cell.target);
+                                cell.flipping = false;
+                            }
+                        }
+                    } else {
+                        rgb_matrix::DrawText(offscreen, font_small, px + 2,
+                                             SF_START_Y + CELL_H - 2, sf_fg,
+                                             nullptr,
+                                             std::string(1, cur).c_str());
+                    }
+
+                    // divider line
+                    for (int ppx = px; ppx < px + CELL_W; ++ppx)
+                        offscreen->SetPixel(ppx, midY, 0, 0, 0);
+
+                    // cell border
+                    for (int ppx = px; ppx < px + CELL_W; ++ppx) {
+                        offscreen->SetPixel(ppx, SF_START_Y, 20, 20, 20);
+                        offscreen->SetPixel(ppx, SF_START_Y + CELL_H - 1, 20,
+                                            20, 20);
+                    }
+                    for (int py = SF_START_Y; py < SF_START_Y + CELL_H; ++py) {
+                        offscreen->SetPixel(px, py, 20, 20, 20);
+                        offscreen->SetPixel(px + CELL_W - 1, py, 20, 20, 20);
+                    }
+                }
             }
         } else if (mode == PTRANS) {
             auto tt = timetable.load(std::memory_order_acquire);
