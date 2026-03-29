@@ -1,4 +1,4 @@
-VERSION=0.2.0
+VERSION=0.3.0
 BUILD := $(shell git describe --tags --always --dirty | sed 's/^v//')
 
 RGB_LIB_DISTRIBUTION=external/rpi-rgb-led-matrix
@@ -23,7 +23,7 @@ build_folder:
 	mkdir build
 
 dev: $(RGB_LIBRARY) build_folder
-	$(CXX) $(CXXFLAGS) src/main.cpp -O0 -o build/ptrans-rgb -isystem $(HTTP_LIB_DIR) -isystem $(JSON_LIB_DIR) -isystem $(RGB_INCDIR) $(LDFLAGS)
+	$(CXX) $(CXXFLAGS) src/main.cpp -O0 -DCPPHTTPLIB_OPENSSL_SUPPORT -o build/ptrans-rgb -isystem $(HTTP_LIB_DIR) -isystem $(JSON_LIB_DIR) -isystem $(RGB_INCDIR) $(LDFLAGS)
 
 prod: $(RGB_LIBRARY) build_folder
 	$(CXX) $(CXXFLAGS) src/main.cpp -O3 -DCPPHTTPLIB_OPENSSL_SUPPORT -o build/ptrans-rgb -isystem $(HTTP_LIB_DIR) -isystem $(JSON_LIB_DIR) -isystem $(RGB_INCDIR) $(LDFLAGS)
