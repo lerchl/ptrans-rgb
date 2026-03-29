@@ -1,5 +1,5 @@
-VERSION=0.2.0
-BUILD := $(shell git describe --tags --always --dirty | sed 's/^v//')
+VERSION=0.3.0
+BUILD := $(VERSION)-$(shell git rev-parse --short HEAD)$(shell git diff --quiet || echo "-dirty")
 
 RGB_LIB_DISTRIBUTION=external/rpi-rgb-led-matrix
 RGB_INCDIR=$(RGB_LIB_DISTRIBUTION)/include
@@ -23,7 +23,7 @@ build_folder:
 	mkdir build
 
 dev: $(RGB_LIBRARY) build_folder
-	$(CXX) $(CXXFLAGS) src/main.cpp -DAPP_VERSION=\"$(BUILD)\" -O0 -o build/ptrans-rgb -isystem $(HTTP_LIB_DIR) -isystem $(JSON_LIB_DIR) -isystem $(RGB_INCDIR) $(LDFLAGS)
+	$(CXX) $(CXXFLAGS) src/main.cpp -DAPP_VERSION=\"$(BUILD)\" -DCPPHTTPLIB_OPENSSL_SUPPORT -O0 -o build/ptrans-rgb -isystem $(HTTP_LIB_DIR) -isystem $(JSON_LIB_DIR) -isystem $(RGB_INCDIR) $(LDFLAGS)
 
 prod: $(RGB_LIBRARY) build_folder 
 	$(CXX) $(CXXFLAGS) src/main.cpp -DAPP_VERSION=\"$(VERSION)\" -O3 -DCPPHTTPLIB_OPENSSL_SUPPORT -o build/ptrans-rgb -isystem $(HTTP_LIB_DIR) -isystem $(JSON_LIB_DIR) -isystem $(RGB_INCDIR) $(LDFLAGS)
