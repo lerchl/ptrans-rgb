@@ -42,4 +42,3 @@ jobs:
           name: v${{ env.VERSION }}
           files: ptrans-rgb-linux-aarch64
           make_latest: true
-          overwrite: true
