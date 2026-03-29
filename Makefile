@@ -1,5 +1,5 @@
 VERSION=0.3.0
-BUILD := $(shell git describe --tags --always --dirty | sed 's/^v//')
+BUILD := $(VERSION)-$(shell git rev-parse --short HEAD)$(shell git diff --quiet || echo "-dirty")
 
 RGB_LIB_DISTRIBUTION=external/rpi-rgb-led-matrix
 RGB_INCDIR=$(RGB_LIB_DISTRIBUTION)/include
