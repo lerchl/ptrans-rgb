@@ -393,25 +393,61 @@ int main(int argc, char *argv[]) {
         offscreen->Fill(bg_color.r, bg_color.g, bg_color.b);
 
         if (mode == TEXT) {
-            static const std::string SF_CHARSET =
-                " AÄBCDEFGHIJKLMNOÖPQRSTUÜVWXYZaäbcdefghijklmnoöpqrstuüvwxyz012"
-                "3456789.:!?-";
-            static const int CELL_W = 7;
-            static const int CELL_GAP = 1;
-            static const int SF_START_X = 1;
-            static const int SF_START_Y = font_large.baseline();
-            static const int FRAMES_PER_STEP = 3;
-            static const int NUM_CELLS = 128 / (CELL_W + CELL_GAP);
+            static const std::vector<std::string> SF_CHARSET = {
+                " ", "A", "Ä", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K",
+                "L", "M", "N", "O", "Ö", "P", "Q", "R", "S", "T", "U", "Ü", "V",
+                "W", "X", "Y", "Z", "a", "ä", "b", "c", "d", "e", "f", "g", "h",
+                "i", "j", "k", "l", "m", "n", "o", "ö", "p", "q", "r", "s", "t",
+                "u", "ü", "v", "w", "x", "y", "z", "0", "1", "2", "3", "4", "5",
+                "6", "7", "8", "9", ".", ":", "!", "?", "-"};
+            static const int SF_CHARSET_SIZE = (int)SF_CHARSET.size();
+            static const int SF_CELL_W = 7;
+            static const int SF_CELL_GAP = 1;
+            static const int SF_MATRIX_W = 128;
+            static const int SF_MATRIX_H = 64;
+            static const int SF_CELL_H = font_large.baseline() + 2;
+            static const int SF_NUM_ROWS = SF_MATRIX_H / SF_CELL_H;
+            static const int SF_NUM_COLS =
+                SF_MATRIX_W / (SF_CELL_W + SF_CELL_GAP);
+            static const int SF_NUM_CELLS = SF_NUM_ROWS * SF_NUM_COLS;
+            static const int SF_FRAMES_PER_STEP = 3;
 
             struct SFCell {
                 int charIndex = 0;
-                char32_t target = U' ';
+                int targetIndex = 0;
                 int frame = 0;
                 int stepsLeft = 0;
                 bool flipping = false;
             };
 
-            static std::vector<SFCell> sf_cells(NUM_CELLS);
+            static auto sf_utf8_split = [](const std::string &s) {
+                std::vector<std::string> result;
+                size_t i = 0;
+                while (i < s.size()) {
+                    unsigned char c = s[i];
+                    int len = 1;
+                    if ((c & 0xE0) == 0xC0)
+                        len = 2;
+                    else if ((c & 0xF0) == 0xE0)
+                        len = 3;
+                    else if ((c & 0xF8) == 0xF0)
+                        len = 4;
+                    result.push_back(s.substr(i, len));
+                    i += len;
+                }
+                return result;
+            };
+
+            static auto sf_charset_index =
+                [](const std::vector<std::string> &charset, int charset_size,
+                   const std::string &cp) {
+                    for (int i = 0; i < charset_size; ++i)
+                        if (charset[i] == cp)
+                            return i;
+                    return 0;
+                };
+
+            static std::vector<SFCell> sf_cells(SF_NUM_CELLS);
             static std::string sf_last_target = "";
 
             auto t = text.load(std::memory_order_acquire);
@@ -433,48 +469,44 @@ int main(int argc, char *argv[]) {
                 y_next_line = write_line(offscreen, font_small, y_next_line,
                                          fg_color_default, text4);
             } else {
-                std::string target = *t;
-                if (target.size() > (size_t)NUM_CELLS)
-                    target = target.substr(0, NUM_CELLS);
-                target += std::string(NUM_CELLS - target.size(), ' ');
-
-                if (target != sf_last_target) {
-                    sf_last_target = target;
-                    for (int i = 0; i < NUM_CELLS; ++i) {
-                        std::string ch(1, target[i]);
-                        int ti = (int)SF_CHARSET.find(target[i]);
-                        if (ti == (int)std::string::npos)
-                            ti = 0;
-                        int steps = (ti - sf_cells[i].charIndex +
-                                     (int)SF_CHARSET.size()) %
-                                    (int)SF_CHARSET.size();
-                        sf_cells[i].target = target[i];
+                if (*t != sf_last_target) {
+                    sf_last_target = *t;
+                    std::vector<std::string> codepoints = sf_utf8_split(*t);
+                    for (int i = 0; i < SF_NUM_CELLS; ++i) {
+                        std::string cp =
+                            (i < (int)codepoints.size()) ? codepoints[i] : " ";
+                        int ti =
+                            sf_charset_index(SF_CHARSET, SF_CHARSET_SIZE, cp);
+                        int steps =
+                            (ti - sf_cells[i].charIndex + SF_CHARSET_SIZE) %
+                            SF_CHARSET_SIZE;
+                        sf_cells[i].targetIndex = ti;
                         sf_cells[i].stepsLeft = steps;
                         sf_cells[i].frame = 0;
                         sf_cells[i].flipping = (steps > 0);
                     }
                 }
 
-                for (int i = 0; i < NUM_CELLS; ++i) {
+                for (int i = 0; i < SF_NUM_CELLS; ++i) {
                     SFCell &cell = sf_cells[i];
-                    int px = SF_START_X + i * (CELL_W + CELL_GAP);
+                    int row = i / SF_NUM_COLS;
+                    int col = i % SF_NUM_COLS;
+                    int px = 1 + col * (SF_CELL_W + SF_CELL_GAP);
+                    int py = font_large.baseline() + row * SF_CELL_H;
 
-                    char displayChar = SF_CHARSET[cell.charIndex];
-
-                    rgb_matrix::DrawText(offscreen, font_large, px, SF_START_Y,
+                    rgb_matrix::DrawText(offscreen, font_large, px, py,
                                          fg_color_default, nullptr,
-                                         std::string(1, displayChar).c_str());
+                                         SF_CHARSET[cell.charIndex].c_str());
 
                     if (cell.flipping) {
                         cell.frame++;
-                        if (cell.frame >= FRAMES_PER_STEP) {
+                        if (cell.frame >= SF_FRAMES_PER_STEP) {
                             cell.frame = 0;
                             cell.charIndex =
-                                (cell.charIndex + 1) % (int)SF_CHARSET.size();
+                                (cell.charIndex + 1) % SF_CHARSET_SIZE;
                             cell.stepsLeft--;
                             if (cell.stepsLeft <= 0) {
-                                cell.charIndex =
-                                    (int)SF_CHARSET.find(cell.target);
+                                cell.charIndex = cell.targetIndex;
                                 cell.flipping = false;
                             }
                         }
