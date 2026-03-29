@@ -61,6 +61,8 @@ static int usage(const char *progname) {
             "\t-f <font-file>       : Use given font for small text (5x8).\n");
     fprintf(stderr,
             "\t-F <font-file>       : Use given font for large text (6x12).\n");
+    fprintf(stderr, "\t-b <ms>              : Blink period in milliseconds for "
+                    "the departing indicator (default: 750).\n");
     rgb_matrix::PrintMatrixFlags(stderr);
     return 1;
 }
@@ -323,6 +325,7 @@ int main(int argc, char *argv[]) {
     std::string data_url = "";
     const char *bdf_font_file_small = NULL;
     const char *bdf_font_file_large = NULL;
+    int departing_indicator_period = 750;
 
     int opt;
     while ((opt = getopt(argc, argv, "p:d:f:F:")) != -1) {
@@ -338,6 +341,9 @@ int main(int argc, char *argv[]) {
             break;
         case 'F':
             bdf_font_file_large = strdup(optarg);
+            break;
+        case 'b':
+            departing_indicator_period = std::stoi(optarg);
             break;
         default:
             return usage(argv[0]);
@@ -442,9 +448,10 @@ int main(int argc, char *argv[]) {
                         std::chrono::duration_cast<std::chrono::milliseconds>(
                             now.time_since_epoch())
                             .count();
-                    bool blink_on = (ms / 250) % 2 == 0;
+                    bool blink_on = (ms / departing_indicator_period) % 2 == 0;
                     std::string countdown_indicator =
-                        (countdown == 0 ? (blink_on ? "*" : " ") : std::to_string(countdown));
+                        (countdown == 0 ? (blink_on ? "*" : " ")
+                                        : std::to_string(countdown));
 
                     std::string line = std::format(
                         "{:<3} {} {:>3}", line_name, pad_utf8(direction, 13),
