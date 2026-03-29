@@ -414,7 +414,7 @@ int main(int argc, char *argv[]) {
             static std::vector<SFCell> sf_cells(NUM_CELLS);
             static std::string sf_last_target = "";
 
-            static rgb_matrix::Color sf_bg = {15, 15, 15};
+            static rgb_matrix::Color sf_bg = {0, 0, 0};
             static rgb_matrix::Color sf_fg = {245, 184, 0};
             static rgb_matrix::Color sf_dim = {120, 90, 0};
 
@@ -489,7 +489,7 @@ int main(int argc, char *argv[]) {
                                                         sf_bg.g, sf_bg.b);
                         } else {
                             // top half: static next char
-                            rgb_matrix::DrawText(offscreen, font_small, px + 2,
+                            rgb_matrix::DrawText(offscreen, font_large, px + 2,
                                                  SF_START_Y + CELL_H - 2,
                                                  sf_dim, nullptr,
                                                  std::string(1, next).c_str());
@@ -502,7 +502,7 @@ int main(int argc, char *argv[]) {
                                 for (int ppx = px; ppx < px + CELL_W; ++ppx)
                                     offscreen->SetPixel(ppx, py, sf_bg.r,
                                                         sf_bg.g, sf_bg.b);
-                            rgb_matrix::DrawText(offscreen, font_small, px + 2,
+                            rgb_matrix::DrawText(offscreen, font_large, px + 2,
                                                  SF_START_Y + CELL_H - 2, sf_fg,
                                                  nullptr,
                                                  std::string(1, next).c_str());
