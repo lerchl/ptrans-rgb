@@ -61,8 +61,6 @@ static int usage(const char *progname) {
             "\t-f <font-file>       : Use given font for small text (5x8).\n");
     fprintf(stderr,
             "\t-F <font-file>       : Use given font for large text (6x12).\n");
-    fprintf(stderr, "\t-b <ms>              : Blink period in milliseconds for "
-                    "the departing indicator (default: 750).\n");
     rgb_matrix::PrintMatrixFlags(stderr);
     return 1;
 }
@@ -325,7 +323,6 @@ int main(int argc, char *argv[]) {
     std::string data_url = "";
     const char *bdf_font_file_small = NULL;
     const char *bdf_font_file_large = NULL;
-    int departing_indicator_period = 750;
 
     int opt;
     while ((opt = getopt(argc, argv, "p:d:f:F:")) != -1) {
@@ -341,9 +338,6 @@ int main(int argc, char *argv[]) {
             break;
         case 'F':
             bdf_font_file_large = strdup(optarg);
-            break;
-        case 'b':
-            departing_indicator_period = std::stoi(optarg);
             break;
         default:
             return usage(argv[0]);
@@ -393,9 +387,9 @@ int main(int argc, char *argv[]) {
         "W", "X", "Y", "Z", "a", "ä", "b", "c", "d", "e", "f", "g", "h",
         "i", "j", "k", "l", "m", "n", "o", "ö", "p", "q", "r", "s", "t",
         "u", "ü", "v", "w", "x", "y", "z", "0", "1", "2", "3", "4", "5",
-        "6", "7", "8", "9", ".", ":", "!", "?", "-", "*"};
+        "6", "7", "8", "9", ".", ":", ",", "!", "?", "-", "*", "\""};
     const int SF_CHARSET_SIZE = (int)SF_CHARSET.size();
-    const int SF_FRAMES_PER_STEP = 3;
+    const int SF_MS_PER_STEP = 50;
     const int SF_MATRIX_W = 128;
     const int SF_MATRIX_H = 64;
 
@@ -444,7 +438,6 @@ int main(int argc, char *argv[]) {
     struct SFCell {
         int charIndex = 0;
         int targetIndex = 0;
-        int frame = 0;
         int stepsLeft = 0;
         bool flipping = false;
     };
@@ -455,11 +448,20 @@ int main(int argc, char *argv[]) {
     std::vector<SFCell> sf_cells_ptrans(SF_NUM_CELLS_SMALL);
     std::string sf_last_target_ptrans = "";
 
+    auto sf_last_step = std::chrono::steady_clock::now();
+
     for (;;) {
         int y_next_line = font_large.baseline();
 
         matrix->SetBrightness(brightness.load(std::memory_order_acquire));
         offscreen->Fill(bg_color.r, bg_color.g, bg_color.b);
+
+        auto now = std::chrono::steady_clock::now();
+        bool sf_step = std::chrono::duration_cast<std::chrono::milliseconds>(
+                           now - sf_last_step)
+                           .count() >= SF_MS_PER_STEP;
+        if (sf_step)
+            sf_last_step = now;
 
         if (mode == TEXT) {
             auto t = text.load(std::memory_order_acquire);
@@ -494,7 +496,6 @@ int main(int argc, char *argv[]) {
                             SF_CHARSET_SIZE;
                         sf_cells[i].targetIndex = ti;
                         sf_cells[i].stepsLeft = steps;
-                        sf_cells[i].frame = 0;
                         sf_cells[i].flipping = (steps > 0);
                     }
                 }
@@ -510,17 +511,12 @@ int main(int argc, char *argv[]) {
                                          fg_color_default, nullptr,
                                          SF_CHARSET[cell.charIndex].c_str());
 
-                    if (cell.flipping) {
-                        cell.frame++;
-                        if (cell.frame >= SF_FRAMES_PER_STEP) {
-                            cell.frame = 0;
-                            cell.charIndex =
-                                (cell.charIndex + 1) % SF_CHARSET_SIZE;
-                            cell.stepsLeft--;
-                            if (cell.stepsLeft <= 0) {
-                                cell.charIndex = cell.targetIndex;
-                                cell.flipping = false;
-                            }
+                    if (cell.flipping && sf_step) {
+                        cell.charIndex = (cell.charIndex + 1) % SF_CHARSET_SIZE;
+                        cell.stepsLeft--;
+                        if (cell.stepsLeft <= 0) {
+                            cell.charIndex = cell.targetIndex;
+                            cell.flipping = false;
                         }
                     }
                 }
@@ -552,15 +548,8 @@ int main(int argc, char *argv[]) {
                     bool late = tt->trips[i].departures[0].late;
                     bool traffic_jam = tt->trips[i].departures[0].traffic_jam;
 
-                    auto now = std::chrono::steady_clock::now();
-                    auto ms =
-                        std::chrono::duration_cast<std::chrono::milliseconds>(
-                            now.time_since_epoch())
-                            .count();
-                    bool blink_on = (ms / departing_indicator_period) % 2 == 0;
                     std::string countdown_indicator =
-                        (countdown == 0 ? (blink_on ? "*" : " ")
-                                        : std::to_string(countdown));
+                        (countdown == 0 ? "*" : std::to_string(countdown));
 
                     display_lines.push_back(std::format(
                         "{:<3} {} {:>3}", line_name, pad_utf8(direction, 17),
@@ -613,7 +602,6 @@ int main(int argc, char *argv[]) {
                         SF_CHARSET_SIZE;
                     sf_cells_ptrans[i].targetIndex = ti;
                     sf_cells_ptrans[i].stepsLeft = steps;
-                    sf_cells_ptrans[i].frame = 0;
                     sf_cells_ptrans[i].flipping = (steps > 0);
                 }
             }
@@ -629,16 +617,12 @@ int main(int argc, char *argv[]) {
                                      fg_color_default, nullptr,
                                      SF_CHARSET[cell.charIndex].c_str());
 
-                if (cell.flipping) {
-                    cell.frame++;
-                    if (cell.frame >= SF_FRAMES_PER_STEP) {
-                        cell.frame = 0;
-                        cell.charIndex = (cell.charIndex + 1) % SF_CHARSET_SIZE;
-                        cell.stepsLeft--;
-                        if (cell.stepsLeft <= 0) {
-                            cell.charIndex = cell.targetIndex;
-                            cell.flipping = false;
-                        }
+                if (cell.flipping && sf_step) {
+                    cell.charIndex = (cell.charIndex + 1) % SF_CHARSET_SIZE;
+                    cell.stepsLeft--;
+                    if (cell.stepsLeft <= 0) {
+                        cell.charIndex = cell.targetIndex;
+                        cell.flipping = false;
                     }
                 }
             }
