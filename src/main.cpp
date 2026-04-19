@@ -57,10 +57,7 @@ static int usage(const char *progname) {
     fprintf(stderr, "Options:\n");
     fprintf(stderr, "\t-p <port>            : Port to listen on.\n");
     fprintf(stderr, "\t-d <data url>        : URL to ptrans-data.\n");
-    fprintf(stderr,
-            "\t-f <font-file>       : Use given font for small text (5x8).\n");
-    fprintf(stderr,
-            "\t-F <font-file>       : Use given font for large text (6x12).\n");
+    fprintf(stderr, "\t-f <font-file>       : BDF font file to use.\n");
     rgb_matrix::PrintMatrixFlags(stderr);
     return 1;
 }
@@ -73,16 +70,14 @@ std::string real_time_indicator(bool real_time, bool late, bool traffic_jam) {
     } else if (real_time) {
         return "\"";
     }
-
     return "";
 }
 
 std::string pad_utf8(const std::string &s, size_t width) {
-    // Count codepoints (not bytes)
     size_t codepoints = 0;
     for (unsigned char c : s)
         if ((c & 0xC0) != 0x80)
-            codepoints++; // skip continuation bytes
+            codepoints++;
     size_t padding = (codepoints < width) ? width - codepoints : 0;
     return s + std::string(padding, ' ');
 }
@@ -90,8 +85,6 @@ std::string pad_utf8(const std::string &s, size_t width) {
 int write_line(rgb_matrix::FrameCanvas *canvas, rgb_matrix::Font &font, int y,
                rgb_matrix::Color color, std::string text) {
     rgb_matrix::DrawText(canvas, font, 0, y, color, NULL, text.c_str(), 0);
-
-    // returns the y position for the next line
     return y + font.baseline() + 4;
 }
 
@@ -110,11 +103,10 @@ int main(int argc, char *argv[]) {
 
     int port = 0;
     std::string data_url = "";
-    const char *bdf_font_file_small = NULL;
-    const char *bdf_font_file_large = NULL;
+    const char *bdf_font_file = NULL;
 
     int opt;
-    while ((opt = getopt(argc, argv, "p:d:f:F:")) != -1) {
+    while ((opt = getopt(argc, argv, "p:d:f:")) != -1) {
         switch (opt) {
         case 'p':
             port = std::stoi(optarg);
@@ -123,35 +115,21 @@ int main(int argc, char *argv[]) {
             data_url = std::string(optarg);
             break;
         case 'f':
-            bdf_font_file_small = strdup(optarg);
-            break;
-        case 'F':
-            bdf_font_file_large = strdup(optarg);
+            bdf_font_file = strdup(optarg);
             break;
         default:
             return usage(argv[0]);
         }
     }
 
-    if (bdf_font_file_small == NULL) {
-        fprintf(stderr, "Need to specify a 5x8 BDF font-file with -f\n");
+    if (bdf_font_file == NULL) {
+        fprintf(stderr, "Need to specify a BDF font-file with -f\n");
         return usage(argv[0]);
     }
 
-    if (bdf_font_file_large == NULL) {
-        fprintf(stderr, "Need to specify a 6x12 BDF font-file with -F\n");
-        return usage(argv[0]);
-    }
-
-    rgb_matrix::Font font_small;
-    if (!font_small.LoadFont(bdf_font_file_small)) {
-        fprintf(stderr, "Couldn't load font '%s'\n", bdf_font_file_small);
-        return 1;
-    }
-
-    rgb_matrix::Font font_large;
-    if (!font_large.LoadFont(bdf_font_file_large)) {
-        fprintf(stderr, "Couldn't load font '%s'\n", bdf_font_file_large);
+    rgb_matrix::Font font;
+    if (!font.LoadFont(bdf_font_file)) {
+        fprintf(stderr, "Couldn't load font '%s'\n", bdf_font_file);
         return 1;
     }
 
@@ -180,7 +158,32 @@ int main(int argc, char *argv[]) {
     timetable_job_thread = std::thread(
         [&run_timetable_job, data_url]() { run_timetable_job(data_url); });
 
-    // --- SF shared constants and helpers ---
+    // --- Derived layout constants ---
+    // Matrix dimensions come from the matrix itself, so --led-chain etc. are
+    // respected
+    const int SF_MATRIX_W = matrix->width();
+    const int SF_MATRIX_H = matrix->height();
+    const int SF_MS_PER_STEP = 25;
+
+    // Font metrics derived from the loaded font
+    const int SF_CHAR_W =
+        font.CharacterWidth('M'); // 'M' as representative fixed width
+    const int SF_CELL_GAP = 1;
+    const int SF_CELL_H = font.baseline() + 2;
+    const int SF_CELL_W = SF_CHAR_W;
+
+    const int SF_NUM_ROWS = SF_MATRIX_H / SF_CELL_H;
+    const int SF_NUM_COLS = SF_MATRIX_W / (SF_CELL_W + SF_CELL_GAP);
+    const int SF_NUM_CELLS = SF_NUM_ROWS * SF_NUM_COLS;
+
+    // PTRANS column layout — calculated from font/matrix dimensions
+    // <line(3)> <space> <direction(dynamic)> <space> <time(3)>
+    const int SF_COL_LINE = 3;
+    const int SF_COL_TIME = 3;  // e.g. "t12" or "\"8" or "*"
+    const int SF_COL_SPACE = 2; // two separator spaces
+    const int SF_COL_DIR =
+        SF_NUM_COLS - SF_COL_LINE - SF_COL_TIME - SF_COL_SPACE;
+
     const std::vector<std::string> SF_CHARSET = {
         " ", "A", "Ä", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K",
         "L", "M", "N", "O", "Ö", "P", "Q", "R", "S", "T", "U", "Ü", "V",
@@ -189,25 +192,6 @@ int main(int argc, char *argv[]) {
         "u", "ü", "v", "w", "x", "y", "z", "0", "1", "2", "3", "4", "5",
         "6", "7", "8", "9", ".", ":", ",", "!", "?", "-", "*", "\""};
     const int SF_CHARSET_SIZE = (int)SF_CHARSET.size();
-    const int SF_MS_PER_STEP = 25;
-    const int SF_MATRIX_W = 192;
-    const int SF_MATRIX_H = 64;
-
-    // TEXT mode grid (font_large)
-    const int SF_CELL_W = 7;
-    const int SF_CELL_GAP = 1;
-    const int SF_CELL_H = font_large.baseline() + 2;
-    const int SF_NUM_ROWS = SF_MATRIX_H / SF_CELL_H;
-    const int SF_NUM_COLS = SF_MATRIX_W / (SF_CELL_W + SF_CELL_GAP);
-    const int SF_NUM_CELLS = SF_NUM_ROWS * SF_NUM_COLS;
-
-    // PTRANS mode grid (font_small)
-    const int SF_CELL_W_SMALL = 4;
-    const int SF_CELL_GAP_SMALL = 1;
-    const int SF_CELL_H_SMALL = font_small.baseline() + 2;
-    const int SF_NUM_COLS_SMALL = 25;
-    const int SF_NUM_ROWS_SMALL = SF_MATRIX_H / SF_CELL_H_SMALL;
-    const int SF_NUM_CELLS_SMALL = SF_NUM_ROWS_SMALL * SF_NUM_COLS_SMALL;
 
     auto sf_utf8_split = [](const std::string &s) {
         std::vector<std::string> result;
@@ -245,13 +229,13 @@ int main(int argc, char *argv[]) {
     std::vector<SFCell> sf_cells(SF_NUM_CELLS);
     std::string sf_last_target = "";
 
-    std::vector<SFCell> sf_cells_ptrans(SF_NUM_CELLS_SMALL);
+    std::vector<SFCell> sf_cells_ptrans(SF_NUM_CELLS);
     std::string sf_last_target_ptrans = "";
 
     auto sf_last_step = std::chrono::steady_clock::now();
 
     for (;;) {
-        int y_next_line = font_large.baseline();
+        int y_next_line = font.baseline();
 
         auto current_config = configuration.load(std::memory_order_acquire);
         matrix->SetBrightness(current_config->brightness);
@@ -268,21 +252,17 @@ int main(int argc, char *argv[]) {
             auto t = text.load(std::memory_order_acquire);
 
             if (!t) {
-                std::string headline = "No text set!";
-                std::string text1 = "POST /text";
-                std::string text2 = "{";
-                std::string text3 = "  \"text\": \"Hello world!\"";
-                std::string text4 = "}";
-                y_next_line = write_line(offscreen, font_large, y_next_line,
-                                         fg_color_default, headline);
-                y_next_line = write_line(offscreen, font_small, y_next_line,
-                                         fg_color_default, text1);
-                y_next_line = write_line(offscreen, font_small, y_next_line,
-                                         fg_color_default, text2);
-                y_next_line = write_line(offscreen, font_small, y_next_line,
-                                         fg_color_default, text3);
-                y_next_line = write_line(offscreen, font_small, y_next_line,
-                                         fg_color_default, text4);
+                y_next_line = write_line(offscreen, font, y_next_line,
+                                         fg_color_default, "No text set!");
+                y_next_line = write_line(offscreen, font, y_next_line,
+                                         fg_color_default, "POST /text");
+                y_next_line = write_line(offscreen, font, y_next_line,
+                                         fg_color_default, "{");
+                y_next_line =
+                    write_line(offscreen, font, y_next_line, fg_color_default,
+                               "  \"text\": \"Hello world!\"");
+                y_next_line = write_line(offscreen, font, y_next_line,
+                                         fg_color_default, "}");
             } else {
                 if (*t != sf_last_target) {
                     sf_last_target = *t;
@@ -306,9 +286,9 @@ int main(int argc, char *argv[]) {
                     int row = i / SF_NUM_COLS;
                     int col = i % SF_NUM_COLS;
                     int px = 1 + col * (SF_CELL_W + SF_CELL_GAP);
-                    int py = font_large.baseline() + row * SF_CELL_H;
+                    int py = font.baseline() + row * SF_CELL_H;
 
-                    rgb_matrix::DrawText(offscreen, font_large, px, py,
+                    rgb_matrix::DrawText(offscreen, font, px, py,
                                          fg_color_default, nullptr,
                                          SF_CHARSET[cell.charIndex].c_str());
 
@@ -337,9 +317,10 @@ int main(int argc, char *argv[]) {
                     std::string direction = tt->trips[i].direction;
 
                     if (tt->trips[i].departures.empty()) {
-                        display_lines.push_back(
-                            std::format("{:<3} {} {:>3}", line_name,
-                                        pad_utf8(direction, 17), "N/A"));
+                        display_lines.push_back(std::format(
+                            "{:<{}} {:<{}} {:>{}}", line_name, SF_COL_LINE,
+                            pad_utf8(direction, SF_COL_DIR), SF_COL_DIR, "N/A",
+                            SF_COL_TIME));
                         display_lines.push_back("");
                         continue;
                     }
@@ -349,13 +330,16 @@ int main(int argc, char *argv[]) {
                     bool late = tt->trips[i].departures[0].late;
                     bool traffic_jam = tt->trips[i].departures[0].traffic_jam;
 
-                    std::string countdown_indicator =
+                    std::string countdown_str =
                         (countdown == 0 ? "*" : std::to_string(countdown));
+                    std::string time_str =
+                        real_time_indicator(real_time, late, traffic_jam) +
+                        countdown_str;
 
                     display_lines.push_back(std::format(
-                        "{:<3} {} {:>3}", line_name, pad_utf8(direction, 17),
-                        real_time_indicator(real_time, late, traffic_jam) +
-                            countdown_indicator));
+                        "{:<{}} {:<{}} {:>{}}", line_name, SF_COL_LINE,
+                        pad_utf8(direction, SF_COL_DIR), SF_COL_DIR, time_str,
+                        SF_COL_TIME));
 
                     if (tt->trips[i].departures.size() > 1) {
                         std::string str = "";
@@ -373,18 +357,20 @@ int main(int argc, char *argv[]) {
                                      })) {
                             str += ((str.length() == 0 ? "" : ", ") + s);
                         }
-                        display_lines.push_back(std::format("{:>25}", str));
+                        // Right-align secondary departures to full row width
+                        display_lines.push_back(
+                            std::format("{:>{}}", str, SF_NUM_COLS));
                     } else {
                         display_lines.push_back("");
                     }
                 }
 
-                for (int row = 0; row < SF_NUM_ROWS_SMALL; ++row) {
+                for (int row = 0; row < SF_NUM_ROWS; ++row) {
                     std::string row_str = (row < (int)display_lines.size())
                                               ? display_lines[row]
                                               : "";
                     auto cps = sf_utf8_split(row_str);
-                    for (int col = 0; col < SF_NUM_COLS_SMALL; ++col) {
+                    for (int col = 0; col < SF_NUM_COLS; ++col) {
                         target_text += (col < (int)cps.size()) ? cps[col] : " ";
                     }
                 }
@@ -394,7 +380,7 @@ int main(int argc, char *argv[]) {
                 sf_last_target_ptrans = target_text;
                 std::vector<std::string> codepoints =
                     sf_utf8_split(target_text);
-                for (int i = 0; i < SF_NUM_CELLS_SMALL; ++i) {
+                for (int i = 0; i < SF_NUM_CELLS; ++i) {
                     std::string cp =
                         (i < (int)codepoints.size()) ? codepoints[i] : " ";
                     int ti = sf_charset_index(SF_CHARSET, SF_CHARSET_SIZE, cp);
@@ -407,15 +393,15 @@ int main(int argc, char *argv[]) {
                 }
             }
 
-            for (int i = 0; i < SF_NUM_CELLS_SMALL; ++i) {
+            for (int i = 0; i < SF_NUM_CELLS; ++i) {
                 SFCell &cell = sf_cells_ptrans[i];
-                int row = i / SF_NUM_COLS_SMALL;
-                int col = i % SF_NUM_COLS_SMALL;
-                int px = 1 + col * (SF_CELL_W_SMALL + SF_CELL_GAP_SMALL);
-                int py = font_small.baseline() + row * SF_CELL_H_SMALL;
+                int row = i / SF_NUM_COLS;
+                int col = i % SF_NUM_COLS;
+                int px = 1 + col * (SF_CELL_W + SF_CELL_GAP);
+                int py = font.baseline() + row * SF_CELL_H;
 
-                rgb_matrix::DrawText(offscreen, font_small, px, py,
-                                     fg_color_default, nullptr,
+                rgb_matrix::DrawText(offscreen, font, px, py, fg_color_default,
+                                     nullptr,
                                      SF_CHARSET[cell.charIndex].c_str());
 
                 if (cell.flipping && sf_step) {
@@ -428,21 +414,17 @@ int main(int argc, char *argv[]) {
                 }
             }
         } else {
-            std::string headline = "No mode set!";
-            std::string text1 = "POST /mode";
-            std::string text2 = "{";
-            std::string text3 = "  \"mode\": 0 (ptrans) | 1 (text)";
-            std::string text4 = "}";
-            y_next_line = write_line(offscreen, font_large, y_next_line,
-                                     fg_color_default, headline);
-            y_next_line = write_line(offscreen, font_small, y_next_line,
-                                     fg_color_default, text1);
-            y_next_line = write_line(offscreen, font_small, y_next_line,
-                                     fg_color_default, text2);
-            y_next_line = write_line(offscreen, font_small, y_next_line,
-                                     fg_color_default, text3);
-            y_next_line = write_line(offscreen, font_small, y_next_line,
-                                     fg_color_default, text4);
+            y_next_line = write_line(offscreen, font, y_next_line,
+                                     fg_color_default, "No mode set!");
+            y_next_line = write_line(offscreen, font, y_next_line,
+                                     fg_color_default, "POST /mode");
+            y_next_line =
+                write_line(offscreen, font, y_next_line, fg_color_default, "{");
+            y_next_line =
+                write_line(offscreen, font, y_next_line, fg_color_default,
+                           "  \"mode\": 0 (ptrans) | 1 (text)");
+            y_next_line =
+                write_line(offscreen, font, y_next_line, fg_color_default, "}");
         }
 
         offscreen = matrix->SwapOnVSync(offscreen);
