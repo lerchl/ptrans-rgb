@@ -190,7 +190,7 @@ int main(int argc, char *argv[]) {
         "6", "7", "8", "9", ".", ":", ",", "!", "?", "-", "*", "\""};
     const int SF_CHARSET_SIZE = (int)SF_CHARSET.size();
     const int SF_MS_PER_STEP = 25;
-    const int SF_MATRIX_W = 128;
+    const int SF_MATRIX_W = 192;
     const int SF_MATRIX_H = 64;
 
     // TEXT mode grid (font_large)
