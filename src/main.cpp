@@ -1,4 +1,5 @@
 #include "graphics.h"
+#include "http_server.hpp"
 #include "led-matrix.h"
 
 #include <atomic>
@@ -9,6 +10,7 @@
 #include <iostream>
 #include <memory>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,34 +19,32 @@
 #include <time.h>
 #include <vector>
 
+#include "config.hpp"
+#include "http_server.hpp"
+#include "lio.hpp"
+
 #ifndef APP_VERSION
 #define APP_VERSION "unknown"
 #endif
 
 using json = nlohmann::json;
 
-enum Mode { PTRANS, TEXT };
-
-std::condition_variable cv;
-std::mutex cv_mutex;
-std::atomic<bool> running{true};
+std::condition_variable app_cv;
+std::mutex app_mutex;
+std::atomic<bool> app_running{true};
 
 rgb_matrix::RGBMatrix *matrix;
-httplib::Server server;
-std::thread http_thread;
-std::thread ptrans_thread;
-
-std::atomic<Mode> mode{PTRANS};
-std::atomic<int> brightness{80};
-std::atomic<std::shared_ptr<const std::string>> text;
+httplib::Server http_server;
+std::thread http_server_thread;
+std::thread timetable_job_thread;
 
 static void interrupt_handler(int) {
-    running = false;
-    cv.notify_all();
+    app_running = false;
+    app_cv.notify_all();
 
-    server.stop();
-    http_thread.join();
-    ptrans_thread.join();
+    http_server.stop();
+    http_server_thread.join();
+    timetable_job_thread.join();
 
     delete matrix;
 
@@ -63,217 +63,6 @@ static int usage(const char *progname) {
             "\t-F <font-file>       : Use given font for large text (6x12).\n");
     rgb_matrix::PrintMatrixFlags(stderr);
     return 1;
-}
-
-struct ModeDto {
-    Mode mode;
-};
-
-inline void to_json(json &j, const ModeDto &m) { j = json{{"mode", m.mode}}; }
-
-inline void from_json(const json &j, ModeDto &m) {
-    m.mode = j.at("mode").get<Mode>();
-}
-
-struct BrightnessDto {
-    int brightness;
-};
-
-inline void to_json(json &j, const BrightnessDto &b) {
-    j = json{{"brightness", b.brightness}};
-}
-
-inline void from_json(const json &j, BrightnessDto &b) {
-    b.brightness = j.at("brightness").get<int>();
-}
-
-struct TextDto {
-    std::string text;
-};
-
-inline void from_json(const json &j, TextDto &t) {
-    t.text = j.at("text").get<std::string>();
-}
-
-inline void to_json(json &j, const TextDto &t) { j = json{{"text", t.text}}; }
-
-void http_server(const int &port) {
-    server.set_default_headers({
-        {"Access-Control-Allow-Origin", "*"},
-        {"Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS"},
-        {"Access-Control-Allow-Headers", "Content-Type"},
-    });
-
-    server.Options(".*", [](const httplib::Request &, httplib::Response &res) {
-        res.status = 204;
-    });
-
-    server.Get("/version",
-               [](const httplib::Request &, httplib::Response &res) {
-                   json j = {{"version", APP_VERSION}};
-                   res.status = 200;
-                   res.set_content(j.dump(), "application/json");
-               });
-
-    server.Get("/mode", [](const httplib::Request &, httplib::Response &res) {
-        ModeDto dto{.mode = mode.load(std::memory_order_acquire)};
-        json j = dto;
-        res.status = 200;
-        res.set_content(j.dump(), "application/json");
-    });
-
-    server.Post(
-        "/mode", [](const httplib::Request &req, httplib::Response &res) {
-            try {
-                Mode new_mode = json::parse(req.body).get<ModeDto>().mode;
-                mode.store(new_mode);
-                res.status = 204;
-            } catch (const json::parse_error &e) {
-                res.status = 400;
-            }
-        });
-
-    server.Get(
-        "/brightness", [](const httplib::Request &, httplib::Response &res) {
-            BrightnessDto dto{.brightness =
-                                  brightness.load(std::memory_order_acquire)};
-            json j = dto;
-            res.status = 200;
-            res.set_content(j.dump(), "application/json");
-        });
-
-    server.Post(
-        "/brightness", [](const httplib::Request &req, httplib::Response &res) {
-            try {
-                int new_brightness =
-                    json::parse(req.body).get<BrightnessDto>().brightness;
-
-                if (new_brightness < 0 || new_brightness > 100) {
-                    res.status = 400;
-                    return;
-                }
-
-                brightness.store(new_brightness);
-                res.status = 204;
-            } catch (const json::parse_error &e) {
-                res.status = 400;
-            }
-        });
-
-    server.Get("/text", [](const httplib::Request &, httplib::Response &res) {
-        if (auto t = text.load(std::memory_order_acquire)) {
-            TextDto dto{.text = *t};
-            json j = dto;
-            res.status = 200;
-            res.set_content(j.dump(), "application/json");
-        } else {
-            res.status = 204;
-        }
-    });
-
-    server.Post("/text",
-                [](const httplib::Request &req, httplib::Response &res) {
-                    try {
-                        auto new_text = std::make_shared<std::string>(
-                            json::parse(req.body).get<TextDto>().text);
-                        text.store(new_text, std::memory_order_release);
-                        res.status = 204;
-                    } catch (const json::parse_error &e) {
-                        res.status = 400;
-                    }
-                });
-
-    server.listen("0.0.0.0", port);
-}
-
-struct DepartureDto {
-    std::optional<std::string> direction;
-    int countdown;
-    bool real_time;
-    bool late;
-    bool traffic_jam;
-};
-
-inline void from_json(const json &j, DepartureDto &d) {
-    d.direction = j.value("direction", std::optional<std::string>{});
-    d.countdown = j.at("countdown").get<int>();
-    d.real_time = j.at("real_time").get<bool>();
-    d.late = j.at("late").get<bool>();
-    d.traffic_jam = j.at("traffic_jam").get<bool>();
-}
-
-struct TripDto {
-    std::string line;
-    std::string direction;
-    int foot_minutes_to_station;
-    std::vector<DepartureDto> departures;
-};
-
-inline void from_json(const json &j, TripDto &t) {
-    t.line = j.at("line").get<std::string>();
-    t.direction = j.at("direction").get<std::string>();
-    t.foot_minutes_to_station = j.at("foot_minutes_to_station").get<int>();
-    t.departures = j.at("departures").get<std::vector<DepartureDto>>();
-}
-
-struct TimetableDto {
-    std::vector<TripDto> trips;
-    std::optional<std::string> message;
-};
-
-inline void from_json(const json &j, TimetableDto &tt) {
-    tt.trips = j.at("trips").get<std::vector<TripDto>>();
-    tt.message = j.value("message", std::optional<std::string>{});
-}
-
-inline TimetableDto parse_timetable(const std::string &body) {
-    json j = json::parse(body);
-    return j.get<TimetableDto>();
-}
-
-struct ErrorDto {
-    std::string message;
-};
-
-inline void from_json(const json &j, ErrorDto &e) {
-    e.message = j.at("message").get<std::string>();
-}
-
-inline ErrorDto parse_error(const std::string &body) {
-    json j = json::parse(body);
-    return j.get<ErrorDto>();
-}
-
-std::atomic<std::shared_ptr<TimetableDto>> timetable;
-
-void ptrans_job(const std::string &data_url) {
-    httplib::Client cli(data_url);
-
-    while (running) {
-        auto result = cli.Get("/timetable");
-        std::string formatted_time =
-            std::format("{0:%F_%T}", std::chrono::system_clock::now());
-
-        if (!result) {
-            std::cerr << std::format("{} - Could not reach ptrans-data",
-                                     formatted_time)
-                      << std::endl;
-        } else if (result->status == 200) {
-            timetable.store(
-                std::make_shared<TimetableDto>(parse_timetable(result->body)),
-                std::memory_order_release);
-        } else {
-            ErrorDto error = parse_error(result->body);
-            std::cerr << std::format("{} - {} Could not fetch timetable: {}",
-                                     formatted_time, result->status,
-                                     error.message)
-                      << std::endl;
-        }
-
-        std::unique_lock<std::mutex> lock(cv_mutex);
-        cv.wait_for(lock, std::chrono::seconds(30),
-                    [] { return !running.load(); });
-    }
 }
 
 std::string real_time_indicator(bool real_time, bool late, bool traffic_jam) {
@@ -377,8 +166,19 @@ int main(int argc, char *argv[]) {
     signal(SIGTERM, interrupt_handler);
     signal(SIGINT, interrupt_handler);
 
-    http_thread = std::thread([&port]() { http_server(port); });
-    ptrans_thread = std::thread([&data_url]() { ptrans_job(data_url); });
+    std::atomic<std::shared_ptr<Configuration>> configuration =
+        std::make_shared<Configuration>(Configuration{
+            .mode = PTRANS, .brightness = 80, .blackout_window = std::nullopt});
+    std::atomic<std::shared_ptr<TimetableDto>> timetable;
+    std::atomic<std::shared_ptr<const std::string>> text;
+
+    auto run_http_server = make_http_server(APP_VERSION, configuration, text);
+    auto run_timetable_job =
+        make_timetable_job(app_cv, app_mutex, app_running, timetable);
+    http_server_thread = std::thread(
+        [&run_http_server, port]() { run_http_server(http_server, port); });
+    timetable_job_thread = std::thread(
+        [&run_timetable_job, data_url]() { run_timetable_job(data_url); });
 
     // --- SF shared constants and helpers ---
     const std::vector<std::string> SF_CHARSET = {
@@ -453,7 +253,8 @@ int main(int argc, char *argv[]) {
     for (;;) {
         int y_next_line = font_large.baseline();
 
-        matrix->SetBrightness(brightness.load(std::memory_order_acquire));
+        auto current_config = configuration.load(std::memory_order_acquire);
+        matrix->SetBrightness(current_config->brightness);
         offscreen->Fill(bg_color.r, bg_color.g, bg_color.b);
 
         auto now = std::chrono::steady_clock::now();
@@ -463,7 +264,7 @@ int main(int argc, char *argv[]) {
         if (sf_step)
             sf_last_step = now;
 
-        if (mode == TEXT) {
+        if (current_config->mode == TEXT) {
             auto t = text.load(std::memory_order_acquire);
 
             if (!t) {
@@ -521,7 +322,7 @@ int main(int argc, char *argv[]) {
                     }
                 }
             }
-        } else if (mode == PTRANS) {
+        } else if (current_config->mode == PTRANS) {
             auto tt = timetable.load(std::memory_order_acquire);
 
             std::string target_text = "";
