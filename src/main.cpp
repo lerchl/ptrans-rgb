@@ -179,10 +179,10 @@ int main(int argc, char *argv[]) {
     // PTRANS column layout — calculated from font/matrix dimensions
     // <line(3)> <space> <direction(dynamic)> <space> <time(3)>
     const int SF_COL_LINE = 3;
-    const int SF_COL_TIME = 3;  // e.g. "t12" or "\"8" or "*"
-    const int SF_COL_SPACE = 2; // two separator spaces
+    const int SF_COL_DEPS = 9;
+    const int SF_COL_SPACE = 2;
     const int SF_COL_DIR =
-        SF_NUM_COLS - SF_COL_LINE - SF_COL_TIME - SF_COL_SPACE;
+        SF_NUM_COLS - SF_COL_LINE - SF_COL_DEPS - SF_COL_SPACE;
 
     const std::vector<std::string> SF_CHARSET = {
         " ", "A", "Ä", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K",
@@ -234,9 +234,54 @@ int main(int argc, char *argv[]) {
 
     auto sf_last_step = std::chrono::steady_clock::now();
 
-    for (;;) {
-        int y_next_line = font.baseline();
+    auto sf_update_cells = [&](std::vector<SFCell> &cells,
+                               std::string &last_target,
+                               const std::string &new_target) {
+        if (new_target == last_target)
+            return;
+        last_target = new_target;
+        std::vector<std::string> codepoints = sf_utf8_split(new_target);
+        for (int i = 0; i < SF_NUM_CELLS; ++i) {
+            std::string cp = (i < (int)codepoints.size()) ? codepoints[i] : " ";
+            int ti = sf_charset_index(SF_CHARSET, SF_CHARSET_SIZE, cp);
+            int steps =
+                (ti - cells[i].charIndex + SF_CHARSET_SIZE) % SF_CHARSET_SIZE;
+            cells[i].targetIndex = ti;
+            cells[i].stepsLeft = steps;
+            cells[i].flipping = (steps > 0);
+        }
+    };
+    auto sf_render_cells = [&](std::vector<SFCell> &cells, bool step) {
+        for (int i = 0; i < SF_NUM_CELLS; ++i) {
+            SFCell &cell = cells[i];
+            int row = i / SF_NUM_COLS;
+            int col = i % SF_NUM_COLS;
+            int px = 1 + col * (SF_CELL_W + SF_CELL_GAP);
+            int py = font.baseline() + row * SF_CELL_H;
 
+            rgb_matrix::DrawText(offscreen, font, px, py, fg_color_default,
+                                 nullptr, SF_CHARSET[cell.charIndex].c_str());
+
+            if (cell.flipping && step) {
+                cell.charIndex = (cell.charIndex + 1) % SF_CHARSET_SIZE;
+                cell.stepsLeft--;
+                if (cell.stepsLeft <= 0) {
+                    cell.charIndex = cell.targetIndex;
+                    cell.flipping = false;
+                }
+            }
+        }
+    };
+
+    auto sf_pad_line = [&](const std::string &s) {
+        auto cps = sf_utf8_split(s);
+        std::string result = s;
+        for (int i = (int)cps.size(); i < SF_NUM_COLS; ++i)
+            result += " ";
+        return result;
+    };
+
+    for (;;) {
         auto current_config = configuration.load(std::memory_order_acquire);
         matrix->SetBrightness(current_config->brightness);
         offscreen->Fill(bg_color.r, bg_color.g, bg_color.b);
@@ -248,69 +293,36 @@ int main(int argc, char *argv[]) {
         if (sf_step)
             sf_last_step = now;
 
+        std::string target_text;
+
         if (current_config->mode == TEXT) {
             auto t = text.load(std::memory_order_acquire);
-
             if (!t) {
-                y_next_line = write_line(offscreen, font, y_next_line,
-                                         fg_color_default, "No text set!");
-                y_next_line = write_line(offscreen, font, y_next_line,
-                                         fg_color_default, "POST /text");
-                y_next_line = write_line(offscreen, font, y_next_line,
-                                         fg_color_default, "{");
-                y_next_line =
-                    write_line(offscreen, font, y_next_line, fg_color_default,
-                               "  \"text\": \"Hello world!\"");
-                y_next_line = write_line(offscreen, font, y_next_line,
-                                         fg_color_default, "}");
+                target_text = sf_pad_line("No text set!") +
+                              sf_pad_line("Go to https://ptrans.home.l3rchl.at");
             } else {
-                if (*t != sf_last_target) {
-                    sf_last_target = *t;
-                    std::vector<std::string> codepoints = sf_utf8_split(*t);
-                    for (int i = 0; i < SF_NUM_CELLS; ++i) {
-                        std::string cp =
-                            (i < (int)codepoints.size()) ? codepoints[i] : " ";
-                        int ti =
-                            sf_charset_index(SF_CHARSET, SF_CHARSET_SIZE, cp);
-                        int steps =
-                            (ti - sf_cells[i].charIndex + SF_CHARSET_SIZE) %
-                            SF_CHARSET_SIZE;
-                        sf_cells[i].targetIndex = ti;
-                        sf_cells[i].stepsLeft = steps;
-                        sf_cells[i].flipping = (steps > 0);
-                    }
-                }
-
-                for (int i = 0; i < SF_NUM_CELLS; ++i) {
-                    SFCell &cell = sf_cells[i];
-                    int row = i / SF_NUM_COLS;
-                    int col = i % SF_NUM_COLS;
-                    int px = 1 + col * (SF_CELL_W + SF_CELL_GAP);
-                    int py = font.baseline() + row * SF_CELL_H;
-
-                    rgb_matrix::DrawText(offscreen, font, px, py,
-                                         fg_color_default, nullptr,
-                                         SF_CHARSET[cell.charIndex].c_str());
-
-                    if (cell.flipping && sf_step) {
-                        cell.charIndex = (cell.charIndex + 1) % SF_CHARSET_SIZE;
-                        cell.stepsLeft--;
-                        if (cell.stepsLeft <= 0) {
-                            cell.charIndex = cell.targetIndex;
-                            cell.flipping = false;
-                        }
-                    }
-                }
+                target_text = *t;
             }
+
         } else if (current_config->mode == PTRANS) {
             auto tt = timetable.load(std::memory_order_acquire);
-
-            std::string target_text = "";
 
             if (!tt) {
                 target_text = "No timetable available";
             } else {
+                auto departure_color = [&](bool real_time, bool late,
+                                           bool traffic_jam) {
+                    if (!real_time)
+                        return fg_color_default;
+                    if (traffic_jam)
+                        return rgb_matrix::Color(255, 100, 0);
+                    if (late)
+                        return rgb_matrix::Color(255, 0, 0);
+                    return rgb_matrix::Color(0, 255, 0);
+                };
+
                 std::vector<std::string> display_lines;
+                std::vector<rgb_matrix::Color> display_line_colors;
 
                 for (int i : std::views::iota(0, (int)tt->trips.size())) {
                     std::string line_name = tt->trips[i].line;
@@ -320,49 +332,28 @@ int main(int argc, char *argv[]) {
                         display_lines.push_back(std::format(
                             "{:<{}} {:<{}} {:>{}}", line_name, SF_COL_LINE,
                             pad_utf8(direction, SF_COL_DIR), SF_COL_DIR, "N/A",
-                            SF_COL_TIME));
-                        display_lines.push_back("");
+                            SF_COL_DEPS));
+                        display_line_colors.push_back(fg_color_default);
                         continue;
                     }
 
-                    int countdown = tt->trips[i].departures[0].countdown;
-                    bool real_time = tt->trips[i].departures[0].real_time;
-                    bool late = tt->trips[i].departures[0].late;
-                    bool traffic_jam = tt->trips[i].departures[0].traffic_jam;
-
-                    std::string countdown_str =
-                        (countdown == 0 ? "*" : std::to_string(countdown));
-                    std::string time_str =
-                        real_time_indicator(real_time, late, traffic_jam) +
-                        countdown_str;
+                    std::string deps_str = "";
+                    for (auto &&dep :
+                         tt->trips[i].departures | std::views::take(3)) {
+                        std::string s = (dep.countdown == 0
+                                             ? "*"
+                                             : std::to_string(dep.countdown));
+                        deps_str += (deps_str.empty() ? "" : " ") + s;
+                    }
 
                     display_lines.push_back(std::format(
                         "{:<{}} {:<{}} {:>{}}", line_name, SF_COL_LINE,
-                        pad_utf8(direction, SF_COL_DIR), SF_COL_DIR, time_str,
-                        SF_COL_TIME));
+                        pad_utf8(direction, SF_COL_DIR), SF_COL_DIR, deps_str,
+                        SF_COL_DEPS));
 
-                    if (tt->trips[i].departures.size() > 1) {
-                        std::string str = "";
-                        for (auto &&s :
-                             tt->trips[i].departures | std::views::drop(1) |
-                                 std::views::take(3) |
-                                 std::views::transform(
-                                     [](DepartureDto &departure) {
-                                         return real_time_indicator(
-                                                    departure.real_time,
-                                                    departure.late,
-                                                    departure.traffic_jam) +
-                                                std::to_string(
-                                                    departure.countdown);
-                                     })) {
-                            str += ((str.length() == 0 ? "" : ", ") + s);
-                        }
-                        // Right-align secondary departures to full row width
-                        display_lines.push_back(
-                            std::format("{:>{}}", str, SF_NUM_COLS));
-                    } else {
-                        display_lines.push_back("");
-                    }
+                    auto &d = tt->trips[i].departures[0];
+                    display_line_colors.push_back(
+                        departure_color(d.real_time, d.late, d.traffic_jam));
                 }
 
                 for (int row = 0; row < SF_NUM_ROWS; ++row) {
@@ -375,58 +366,13 @@ int main(int argc, char *argv[]) {
                     }
                 }
             }
-
-            if (target_text != sf_last_target_ptrans) {
-                sf_last_target_ptrans = target_text;
-                std::vector<std::string> codepoints =
-                    sf_utf8_split(target_text);
-                for (int i = 0; i < SF_NUM_CELLS; ++i) {
-                    std::string cp =
-                        (i < (int)codepoints.size()) ? codepoints[i] : " ";
-                    int ti = sf_charset_index(SF_CHARSET, SF_CHARSET_SIZE, cp);
-                    int steps =
-                        (ti - sf_cells_ptrans[i].charIndex + SF_CHARSET_SIZE) %
-                        SF_CHARSET_SIZE;
-                    sf_cells_ptrans[i].targetIndex = ti;
-                    sf_cells_ptrans[i].stepsLeft = steps;
-                    sf_cells_ptrans[i].flipping = (steps > 0);
-                }
-            }
-
-            for (int i = 0; i < SF_NUM_CELLS; ++i) {
-                SFCell &cell = sf_cells_ptrans[i];
-                int row = i / SF_NUM_COLS;
-                int col = i % SF_NUM_COLS;
-                int px = 1 + col * (SF_CELL_W + SF_CELL_GAP);
-                int py = font.baseline() + row * SF_CELL_H;
-
-                rgb_matrix::DrawText(offscreen, font, px, py, fg_color_default,
-                                     nullptr,
-                                     SF_CHARSET[cell.charIndex].c_str());
-
-                if (cell.flipping && sf_step) {
-                    cell.charIndex = (cell.charIndex + 1) % SF_CHARSET_SIZE;
-                    cell.stepsLeft--;
-                    if (cell.stepsLeft <= 0) {
-                        cell.charIndex = cell.targetIndex;
-                        cell.flipping = false;
-                    }
-                }
-            }
         } else {
-            y_next_line = write_line(offscreen, font, y_next_line,
-                                     fg_color_default, "No mode set!");
-            y_next_line = write_line(offscreen, font, y_next_line,
-                                     fg_color_default, "POST /mode");
-            y_next_line =
-                write_line(offscreen, font, y_next_line, fg_color_default, "{");
-            y_next_line =
-                write_line(offscreen, font, y_next_line, fg_color_default,
-                           "  \"mode\": 0 (ptrans) | 1 (text)");
-            y_next_line =
-                write_line(offscreen, font, y_next_line, fg_color_default, "}");
+            target_text = sf_pad_line("No mode set!") +
+                          sf_pad_line("Go to https://ptrans.home.l3rchl.at");
         }
 
+        sf_update_cells(sf_cells_ptrans, sf_last_target_ptrans, target_text);
+        sf_render_cells(sf_cells_ptrans, sf_step);
         offscreen = matrix->SwapOnVSync(offscreen);
     }
 }
