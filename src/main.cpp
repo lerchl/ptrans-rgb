@@ -308,6 +308,7 @@ int main(int argc, char *argv[]) {
                 cell.steps_left--;
                 if (cell.steps_left <= 0) {
                     cell.char_index = cell.target_index;
+                    cell.current_fg_color = cell.target_fg_color;
                     cell.flipping = false;
                 }
             }
