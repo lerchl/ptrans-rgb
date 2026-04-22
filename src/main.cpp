@@ -3,6 +3,7 @@
 #include "led-matrix.h"
 
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdlib>
 #include <getopt.h>
@@ -79,6 +80,21 @@ static int usage(const char *progname) {
     fprintf(stderr, "\t-f <font-file>       : BDF font file to use.\n");
     rgb_matrix::PrintMatrixFlags(stderr);
     return 1;
+}
+
+Time nowTime() {
+    auto now = std::chrono::system_clock::now();
+
+    std::chrono::zoned_time zt{std::chrono::current_zone(), now};
+    auto local = zt.get_local_time();
+
+    auto since_midnight = local - std::chrono::floor<std::chrono::days>(local);
+
+    auto h = std::chrono::duration_cast<std::chrono::hours>(since_midnight);
+    auto m =
+        std::chrono::duration_cast<std::chrono::minutes>(since_midnight - h);
+
+    return Time{static_cast<int>(h.count()), static_cast<int>(m.count())};
 }
 
 std::string pad_utf8(const std::string &s, size_t width) {
@@ -332,6 +348,12 @@ int main(int argc, char *argv[]) {
 
     for (;;) {
         auto current_config = configuration.load(std::memory_order_acquire);
+
+        if (current_config->blackout_window->isDuringBlackout(nowTime())) {
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+            continue;
+        }
+
         matrix->SetBrightness(current_config->brightness);
         offscreen->Fill(bg_color.r, bg_color.g, bg_color.b);
 

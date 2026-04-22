@@ -1,5 +1,7 @@
 #include "config.hpp"
 
+int Time::toMinutes() const { return hour * 60 + minute; }
+
 void from_json(const json &j, Time &t) {
     t.hour = j.at("hour").get<uint8_t>();
     t.minute = j.at("minute").get<uint8_t>();
@@ -7,6 +9,24 @@ void from_json(const json &j, Time &t) {
 
 void to_json(json &j, const Time &t) {
     j = json{{"hour", t.hour}, {"minute", t.minute}};
+}
+
+bool BlackoutWindow::isDuringBlackout(const Time &time) const {
+    if (override) {
+        return false;
+    }
+
+    int s = start.toMinutes();
+    int e = end.toMinutes();
+    int t = time.toMinutes();
+
+    if (s <= e) {
+        // Normal case (e.g., 08:00 → 17:00)
+        return t >= s && t < e;
+    } else {
+        // Crosses midnight (e.g., 22:00 → 08:00)
+        return t >= s || t < e;
+    }
 }
 
 void from_json(const json &j, BlackoutWindow &b) {
@@ -28,8 +48,6 @@ void to_json(json &j, const Color &c) {
     j = json{{"r", c.r}, {"g", c.g}, {"b", c.b}};
 }
 
-Color::operator rgb_matrix::Color() const { return rgb_matrix::Color(r, g, b); }
-
 void from_json(const json &j, Colors &c) {
     j.at("fgDefault").get_to(c.fg_default);
     j.at("fgLate").get_to(c.fg_late);
@@ -43,6 +61,8 @@ void to_json(json &j, const Colors &c) {
              {"fgTraffic", c.fg_traffic},
              {"fgPunctual", c.fg_punctual}};
 }
+
+Color::operator rgb_matrix::Color() const { return rgb_matrix::Color(r, g, b); }
 
 void from_json(const json &j, PatchConfigurationDto &p) {
     if (j.contains("brightness"))

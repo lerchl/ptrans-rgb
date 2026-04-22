@@ -10,6 +10,8 @@ enum Mode { PTRANS, TEXT };
 struct Time {
     int hour;
     int minute;
+
+    int toMinutes() const;
 };
 void from_json(const json &j, Time &t);
 void to_json(json &j, const Time &t);
@@ -18,6 +20,8 @@ struct BlackoutWindow {
     Time start;
     Time end;
     bool override;
+
+    bool isDuringBlackout(const Time&) const;
 };
 void from_json(const json &j, BlackoutWindow &b);
 void to_json(json &j, const BlackoutWindow &b);
