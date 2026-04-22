@@ -18,22 +18,49 @@ void to_json(json &j, const BlackoutWindow &b) {
     j = json{{"start", b.start}, {"end", b.end}};
 }
 
+void from_json(const json &j, Color &c) {
+    j.at("r").get_to(c.r);
+    j.at("g").get_to(c.g);
+    j.at("b").get_to(c.b);
+}
+
+void to_json(json &j, const Color &c) {
+    j = json{{"r", c.r}, {"g", c.g}, {"b", c.b}};
+}
+
+Color::operator rgb_matrix::Color() const { return rgb_matrix::Color(r, g, b); }
+
+void from_json(const json &j, Colors &c) {
+    j.at("fgDefault").get_to(c.fg_default);
+    j.at("fgLate").get_to(c.fg_late);
+    j.at("fgTraffic").get_to(c.fg_traffic);
+    j.at("fgPunctual").get_to(c.fg_punctual);
+}
+
+void to_json(json &j, const Colors &c) {
+    j = json{{"fgDefault", c.fg_default},
+             {"fgLate", c.fg_late},
+             {"fgTraffic", c.fg_traffic},
+             {"fgPunctual", c.fg_punctual}};
+}
+
 void from_json(const json &j, PatchConfigurationDto &p) {
-    if (j.contains("brightness")) {
+    if (j.contains("brightness"))
         p.brightness = j.at("brightness").get<int>();
-    }
 
-    if (j.contains("mode")) {
+    if (j.contains("mode"))
         p.mode = j.at("mode").get<Mode>();
-    }
 
-    if (j.contains("blackout_window")) {
-        p.blackout_window = j.at("blackout_window").get<BlackoutWindow>();
-    }
+    if (j.contains("blackoutWindow"))
+        p.blackout_window = j.at("blackoutWindow").get<BlackoutWindow>();
+
+    if (j.contains("colors"))
+        p.colors = j.at("colors").get<Colors>();
 }
 
 void to_json(json &j, const Configuration &c) {
     j = json{{"brightness", c.brightness},
              {"mode", c.mode},
-             {"blackout_window", c.blackout_window}};
+             {"blackoutWindow", c.blackout_window},
+             {"colors", c.colors}};
 }

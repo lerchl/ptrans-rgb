@@ -38,6 +38,22 @@ httplib::Server http_server;
 std::thread http_server_thread;
 std::thread timetable_job_thread;
 
+struct SFChar {
+    std::string glyph;
+    Color color;
+};
+
+bool operator==(const SFChar &a, const SFChar &b) {
+    return a.glyph == b.glyph && a.color.r == b.color.r &&
+           a.color.g == b.color.g && a.color.b == b.color.b;
+}
+
+std::vector<SFChar> operator+(std::vector<SFChar> a,
+                              const std::vector<SFChar> &b) {
+    a.insert(a.end(), b.begin(), b.end());
+    return a;
+}
+
 static void interrupt_handler(int) {
     app_running = false;
     app_cv.notify_all();
@@ -62,17 +78,6 @@ static int usage(const char *progname) {
     return 1;
 }
 
-std::string real_time_indicator(bool real_time, bool late, bool traffic_jam) {
-    if (traffic_jam) {
-        return "t";
-    } else if (late) {
-        return ".";
-    } else if (real_time) {
-        return "\"";
-    }
-    return "";
-}
-
 std::string pad_utf8(const std::string &s, size_t width) {
     size_t codepoints = 0;
     for (unsigned char c : s)
@@ -80,12 +85,6 @@ std::string pad_utf8(const std::string &s, size_t width) {
             codepoints++;
     size_t padding = (codepoints < width) ? width - codepoints : 0;
     return s + std::string(padding, ' ');
-}
-
-int write_line(rgb_matrix::FrameCanvas *canvas, rgb_matrix::Font &font, int y,
-               rgb_matrix::Color color, std::string text) {
-    rgb_matrix::DrawText(canvas, font, 0, y, color, NULL, text.c_str(), 0);
-    return y + font.baseline() + 4;
 }
 
 int main(int argc, char *argv[]) {
@@ -146,7 +145,14 @@ int main(int argc, char *argv[]) {
 
     std::atomic<std::shared_ptr<Configuration>> configuration =
         std::make_shared<Configuration>(Configuration{
-            .mode = PTRANS, .brightness = 80, .blackout_window = std::nullopt});
+            .mode = PTRANS,
+            .brightness = 80,
+            .blackout_window = std::nullopt,
+            .colors = {.fg_default = {.r = 100, .g = 0, .b = 255},
+                       .fg_late = {.r = 255, .g = 0, .b = 0},
+                       .fg_traffic = {.r = 255, .g = 100, .b = 0},
+                       .fg_punctual = {.r = 0, .g = 255, .b = 0}}});
+
     std::atomic<std::shared_ptr<TimetableDto>> timetable;
     std::atomic<std::shared_ptr<const std::string>> text;
 
@@ -176,22 +182,58 @@ int main(int argc, char *argv[]) {
     const int SF_NUM_COLS = SF_MATRIX_W / (SF_CELL_W + SF_CELL_GAP);
     const int SF_NUM_CELLS = SF_NUM_ROWS * SF_NUM_COLS;
 
-    // PTRANS column layout — calculated from font/matrix dimensions
-    // <line(3)> <space> <direction(dynamic)> <space> <time(3)>
     const int SF_COL_LINE = 3;
     const int SF_COL_DEPS = 9;
     const int SF_COL_SPACE = 2;
     const int SF_COL_DIR =
         SF_NUM_COLS - SF_COL_LINE - SF_COL_DEPS - SF_COL_SPACE;
 
-    const std::vector<std::string> SF_CHARSET = {
-        " ", "A", "Ä", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K",
-        "L", "M", "N", "O", "Ö", "P", "Q", "R", "S", "T", "U", "Ü", "V",
-        "W", "X", "Y", "Z", "a", "ä", "b", "c", "d", "e", "f", "g", "h",
-        "i", "j", "k", "l", "m", "n", "o", "ö", "p", "q", "r", "s", "t",
-        "u", "ü", "v", "w", "x", "y", "z", "0", "1", "2", "3", "4", "5",
-        "6", "7", "8", "9", ".", ":", ",", "!", "?", "-", "*", "\""};
+    const Color SF_WHITE = {255, 255, 255};
+
+    const std::vector<SFChar> SF_CHARSET = {
+        {" ", SF_WHITE},       {"█", {255, 80, 80}}, {"█", {255, 160, 0}},
+        {"█", {255, 255, 0}},  {"█", {80, 255, 80}}, {"█", {0, 200, 255}},
+        {"█", {160, 80, 255}}, {"A", SF_WHITE},      {"Ä", SF_WHITE},
+        {"B", SF_WHITE},       {"C", SF_WHITE},      {"D", SF_WHITE},
+        {"E", SF_WHITE},       {"F", SF_WHITE},      {"G", SF_WHITE},
+        {"H", SF_WHITE},       {"I", SF_WHITE},      {"J", SF_WHITE},
+        {"K", SF_WHITE},       {"L", SF_WHITE},      {"M", SF_WHITE},
+        {"N", SF_WHITE},       {"O", SF_WHITE},      {"Ö", SF_WHITE},
+        {"P", SF_WHITE},       {"Q", SF_WHITE},      {"R", SF_WHITE},
+        {"S", SF_WHITE},       {"T", SF_WHITE},      {"U", SF_WHITE},
+        {"Ü", SF_WHITE},       {"V", SF_WHITE},      {"W", SF_WHITE},
+        {"X", SF_WHITE},       {"Y", SF_WHITE},      {"Z", SF_WHITE},
+        {"a", SF_WHITE},       {"ä", SF_WHITE},      {"b", SF_WHITE},
+        {"c", SF_WHITE},       {"d", SF_WHITE},      {"e", SF_WHITE},
+        {"f", SF_WHITE},       {"g", SF_WHITE},      {"h", SF_WHITE},
+        {"i", SF_WHITE},       {"j", SF_WHITE},      {"k", SF_WHITE},
+        {"l", SF_WHITE},       {"m", SF_WHITE},      {"n", SF_WHITE},
+        {"o", SF_WHITE},       {"ö", SF_WHITE},      {"p", SF_WHITE},
+        {"q", SF_WHITE},       {"r", SF_WHITE},      {"s", SF_WHITE},
+        {"t", SF_WHITE},       {"u", SF_WHITE},      {"ü", SF_WHITE},
+        {"v", SF_WHITE},       {"w", SF_WHITE},      {"x", SF_WHITE},
+        {"y", SF_WHITE},       {"z", SF_WHITE},      {"0", SF_WHITE},
+        {"1", SF_WHITE},       {"2", SF_WHITE},      {"3", SF_WHITE},
+        {"4", SF_WHITE},       {"5", SF_WHITE},      {"6", SF_WHITE},
+        {"7", SF_WHITE},       {"8", SF_WHITE},      {"9", SF_WHITE},
+        {".", SF_WHITE},       {":", SF_WHITE},      {",", SF_WHITE},
+        {"!", SF_WHITE},       {"?", SF_WHITE},      {"-", SF_WHITE},
+        {"*", SF_WHITE},       {"\"", SF_WHITE},
+    };
     const int SF_CHARSET_SIZE = (int)SF_CHARSET.size();
+
+    auto sf_charset_index = [&](const std::string &glyph, const Color &color) {
+        for (int i = 0; i < SF_CHARSET_SIZE; ++i)
+            if (SF_CHARSET[i].glyph == glyph &&
+                SF_CHARSET[i].color.r == color.r &&
+                SF_CHARSET[i].color.g == color.g &&
+                SF_CHARSET[i].color.b == color.b)
+                return i;
+        for (int i = 0; i < SF_CHARSET_SIZE; ++i)
+            if (SF_CHARSET[i].glyph == glyph)
+                return i;
+        return 0;
+    };
 
     auto sf_utf8_split = [](const std::string &s) {
         std::vector<std::string> result;
@@ -211,46 +253,38 @@ int main(int argc, char *argv[]) {
         return result;
     };
 
-    auto sf_charset_index = [](const std::vector<std::string> &charset,
-                               int charset_size, const std::string &cp) {
-        for (int i = 0; i < charset_size; ++i)
-            if (charset[i] == cp)
-                return i;
-        return 0;
-    };
-
     struct SFCell {
-        int charIndex = 0;
-        int targetIndex = 0;
-        int stepsLeft = 0;
+        int char_index = 0;
+        int target_index = 0;
+        int steps_left = 0;
         bool flipping = false;
+        rgb_matrix::Color fg_color = rgb_matrix::Color(255, 255, 255);
     };
 
-    std::vector<SFCell> sf_cells(SF_NUM_CELLS);
-    std::string sf_last_target = "";
-
-    std::vector<SFCell> sf_cells_ptrans(SF_NUM_CELLS);
-    std::string sf_last_target_ptrans = "";
+    std::vector<SFCell> cells(SF_NUM_CELLS);
+    std::vector<SFChar> previous_target(SF_NUM_CELLS);
 
     auto sf_last_step = std::chrono::steady_clock::now();
 
     auto sf_update_cells = [&](std::vector<SFCell> &cells,
-                               std::string &last_target,
-                               const std::string &new_target) {
+                               std::vector<SFChar> &last_target,
+                               const std::vector<SFChar> &new_target) {
         if (new_target == last_target)
             return;
         last_target = new_target;
-        std::vector<std::string> codepoints = sf_utf8_split(new_target);
         for (int i = 0; i < SF_NUM_CELLS; ++i) {
-            std::string cp = (i < (int)codepoints.size()) ? codepoints[i] : " ";
-            int ti = sf_charset_index(SF_CHARSET, SF_CHARSET_SIZE, cp);
+            const SFChar &tc = (i < (int)new_target.size())
+                                   ? new_target[i]
+                                   : SFChar{" ", SF_WHITE};
+            int ti = sf_charset_index(tc.glyph, tc.color);
             int steps =
-                (ti - cells[i].charIndex + SF_CHARSET_SIZE) % SF_CHARSET_SIZE;
-            cells[i].targetIndex = ti;
-            cells[i].stepsLeft = steps;
+                (ti - cells[i].char_index + SF_CHARSET_SIZE) % SF_CHARSET_SIZE;
+            cells[i].target_index = ti;
+            cells[i].steps_left = steps;
             cells[i].flipping = (steps > 0);
         }
     };
+
     auto sf_render_cells = [&](std::vector<SFCell> &cells, bool step) {
         for (int i = 0; i < SF_NUM_CELLS; ++i) {
             SFCell &cell = cells[i];
@@ -259,25 +293,28 @@ int main(int argc, char *argv[]) {
             int px = 1 + col * (SF_CELL_W + SF_CELL_GAP);
             int py = font.baseline() + row * SF_CELL_H;
 
-            rgb_matrix::DrawText(offscreen, font, px, py, fg_color_default,
-                                 nullptr, SF_CHARSET[cell.charIndex].c_str());
+            const SFChar &sc = SF_CHARSET[cell.char_index];
+            rgb_matrix::DrawText(offscreen, font, px, py, sc.color, nullptr,
+                                 sc.glyph.c_str());
 
             if (cell.flipping && step) {
-                cell.charIndex = (cell.charIndex + 1) % SF_CHARSET_SIZE;
-                cell.stepsLeft--;
-                if (cell.stepsLeft <= 0) {
-                    cell.charIndex = cell.targetIndex;
+                cell.char_index = (cell.char_index + 1) % SF_CHARSET_SIZE;
+                cell.steps_left--;
+                if (cell.steps_left <= 0) {
+                    cell.char_index = cell.target_index;
                     cell.flipping = false;
                 }
             }
         }
     };
 
-    auto sf_pad_line = [&](const std::string &s) {
+    auto sf_pad_line = [&](const std::string &s, const Color &color) {
         auto cps = sf_utf8_split(s);
-        std::string result = s;
-        for (int i = (int)cps.size(); i < SF_NUM_COLS; ++i)
-            result += " ";
+        std::vector<SFChar> result;
+        for (int i = 0; i < SF_NUM_COLS; ++i) {
+            std::string glyph = (i < (int)cps.size()) ? cps[i] : " ";
+            result.push_back({glyph, color});
+        }
         return result;
     };
 
@@ -287,92 +324,205 @@ int main(int argc, char *argv[]) {
         offscreen->Fill(bg_color.r, bg_color.g, bg_color.b);
 
         auto now = std::chrono::steady_clock::now();
-        bool sf_step = std::chrono::duration_cast<std::chrono::milliseconds>(
-                           now - sf_last_step)
-                           .count() >= SF_MS_PER_STEP;
-        if (sf_step)
+        bool step = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        now - sf_last_step)
+                        .count() >= SF_MS_PER_STEP;
+        if (step)
             sf_last_step = now;
 
-        std::string target_text;
+        std::vector<SFChar> new_target;
 
         if (current_config->mode == TEXT) {
             auto t = text.load(std::memory_order_acquire);
             if (!t) {
-                target_text = sf_pad_line("No text set!") +
-                              sf_pad_line("Go to https://ptrans.home.l3rchl.at");
+                new_target = sf_pad_line("No text set!",
+                                         current_config->colors.fg_default) +
+                             sf_pad_line("Go to https://ptrans.home.l3rchl.at",
+                                         current_config->colors.fg_default);
             } else {
-                target_text = *t;
+                auto cps = sf_utf8_split(*t);
+                new_target = std::views::iota(0, SF_NUM_CELLS) |
+                             std::views::transform([&](int i) -> SFChar {
+                                 return {(i < (int)cps.size()) ? cps[i] : " ",
+                                         current_config->colors.fg_default};
+                             }) |
+                             std::ranges::to<std::vector>();
             }
-
         } else if (current_config->mode == PTRANS) {
             auto tt = timetable.load(std::memory_order_acquire);
-
             if (!tt) {
-                target_text = "No timetable available";
+                new_target = sf_pad_line("No timetable available",
+                                         current_config->colors.fg_default);
             } else {
                 auto departure_color = [&](bool real_time, bool late,
-                                           bool traffic_jam) {
+                                           bool traffic_jam) -> Color {
                     if (!real_time)
-                        return fg_color_default;
+                        return current_config->colors.fg_default;
                     if (traffic_jam)
-                        return rgb_matrix::Color(255, 100, 0);
+                        return current_config->colors.fg_traffic;
                     if (late)
-                        return rgb_matrix::Color(255, 0, 0);
-                    return rgb_matrix::Color(0, 255, 0);
+                        return current_config->colors.fg_late;
+                    return current_config->colors.fg_punctual;
                 };
 
-                std::vector<std::string> display_lines;
-                std::vector<rgb_matrix::Color> display_line_colors;
+                struct DisplayLine {
+                    std::string line_name;
+                    std::string direction;
+                    std::string deps_str;
+                    Color deps_color;
+                };
+
+                std::vector<DisplayLine> display_lines;
 
                 for (int i : std::views::iota(0, (int)tt->trips.size())) {
-                    std::string line_name = tt->trips[i].line;
-                    std::string direction = tt->trips[i].direction;
+                    auto &trip = tt->trips[i];
+                    DisplayLine dl;
+                    dl.line_name = trip.line;
+                    dl.direction = trip.direction;
 
-                    if (tt->trips[i].departures.empty()) {
-                        display_lines.push_back(std::format(
-                            "{:<{}} {:<{}} {:>{}}", line_name, SF_COL_LINE,
-                            pad_utf8(direction, SF_COL_DIR), SF_COL_DIR, "N/A",
-                            SF_COL_DEPS));
-                        display_line_colors.push_back(fg_color_default);
+                    if (trip.departures.empty()) {
+                        dl.deps_str = "N/A";
+                        dl.deps_color = current_config->colors.fg_default;
+                    } else {
+                        for (auto &&dep :
+                             trip.departures | std::views::take(3)) {
+                            std::string s = dep.countdown == 0
+                                                ? "*"
+                                                : std::to_string(dep.countdown);
+                            dl.deps_str += (dl.deps_str.empty() ? "" : " ") + s;
+                        }
+                        auto &d = trip.departures[0];
+                        dl.deps_color =
+                            departure_color(d.real_time, d.late, d.traffic_jam);
+                    }
+
+                    display_lines.push_back(dl);
+                }
+
+                new_target.clear();
+                for (int row = 0; row < SF_NUM_ROWS; ++row) {
+                    if (row >= (int)display_lines.size()) {
+                        auto padding =
+                            sf_pad_line("", current_config->colors.fg_default);
+                        new_target.insert(new_target.end(), padding.begin(),
+                                          padding.end());
                         continue;
                     }
 
-                    std::string deps_str = "";
-                    for (auto &&dep :
-                         tt->trips[i].departures | std::views::take(3)) {
-                        std::string s = (dep.countdown == 0
-                                             ? "*"
-                                             : std::to_string(dep.countdown));
-                        deps_str += (deps_str.empty() ? "" : " ") + s;
+                    auto &dl = display_lines[row];
+
+                    // line name + direction in default color
+                    std::string prefix = std::format(
+                        "{:<{}} {:<{}} ", dl.line_name, SF_COL_LINE,
+                        pad_utf8(dl.direction, SF_COL_DIR), SF_COL_DIR);
+                    auto prefix_cps = sf_utf8_split(prefix);
+                    for (auto &cp : prefix_cps)
+                        new_target.push_back(
+                            {cp, current_config->colors.fg_default});
+
+                    // departure times in their own color
+                    std::string deps =
+                        std::format("{:>{}}", dl.deps_str, SF_COL_DEPS);
+                    auto tt = timetable.load(std::memory_order_acquire);
+                    if (!tt) {
+                        new_target =
+                            sf_pad_line("No timetable available",
+                                        current_config->colors.fg_default);
+                    } else {
+                        auto departure_color = [&](bool real_time, bool late,
+                                                   bool traffic_jam) -> Color {
+                            if (!real_time)
+                                return current_config->colors.fg_default;
+                            if (traffic_jam)
+                                return current_config->colors.fg_traffic;
+                            if (late)
+                                return current_config->colors.fg_late;
+                            return current_config->colors.fg_punctual;
+                        };
+
+                        struct DisplayLine {
+                            std::string line_name;
+                            std::string direction;
+                            std::string deps_str;
+                            Color deps_color;
+                        };
+
+                        std::vector<DisplayLine> display_lines;
+
+                        for (int i :
+                             std::views::iota(0, (int)tt->trips.size())) {
+                            auto &trip = tt->trips[i];
+                            DisplayLine dl;
+                            dl.line_name = trip.line;
+                            dl.direction = trip.direction;
+
+                            if (trip.departures.empty()) {
+                                dl.deps_str = "N/A";
+                                dl.deps_color =
+                                    current_config->colors.fg_default;
+                            } else {
+                                for (auto &&dep :
+                                     trip.departures | std::views::take(3)) {
+                                    std::string s =
+                                        dep.countdown == 0
+                                            ? "*"
+                                            : std::to_string(dep.countdown);
+                                    dl.deps_str +=
+                                        (dl.deps_str.empty() ? "" : " ") + s;
+                                }
+                                auto &d = trip.departures[0];
+                                dl.deps_color = departure_color(
+                                    d.real_time, d.late, d.traffic_jam);
+                            }
+
+                            display_lines.push_back(dl);
+                        }
+
+                        new_target.clear();
+                        for (int row = 0; row < SF_NUM_ROWS; ++row) {
+                            if (row >= (int)display_lines.size()) {
+                                auto padding = sf_pad_line(
+                                    "", current_config->colors.fg_default);
+                                new_target.insert(new_target.end(),
+                                                  padding.begin(),
+                                                  padding.end());
+                                continue;
+                            }
+
+                            auto &dl = display_lines[row];
+
+                            // line name + direction in default color
+                            std::string prefix = std::format(
+                                "{:<{}} {:<{}} ", dl.line_name, SF_COL_LINE,
+                                pad_utf8(dl.direction, SF_COL_DIR), SF_COL_DIR);
+                            auto prefix_cps = sf_utf8_split(prefix);
+                            for (auto &cp : prefix_cps)
+                                new_target.push_back(
+                                    {cp, current_config->colors.fg_default});
+
+                            // departure times in their own color
+                            std::string deps =
+                                std::format("{:>{}}", dl.deps_str, SF_COL_DEPS);
+                            auto deps_cps = sf_utf8_split(deps);
+                            for (auto &cp : deps_cps)
+                                new_target.push_back({cp, dl.deps_color});
+                        }
                     }
-
-                    display_lines.push_back(std::format(
-                        "{:<{}} {:<{}} {:>{}}", line_name, SF_COL_LINE,
-                        pad_utf8(direction, SF_COL_DIR), SF_COL_DIR, deps_str,
-                        SF_COL_DEPS));
-
-                    auto &d = tt->trips[i].departures[0];
-                    display_line_colors.push_back(
-                        departure_color(d.real_time, d.late, d.traffic_jam));
-                }
-
-                for (int row = 0; row < SF_NUM_ROWS; ++row) {
-                    std::string row_str = (row < (int)display_lines.size())
-                                              ? display_lines[row]
-                                              : "";
-                    auto cps = sf_utf8_split(row_str);
-                    for (int col = 0; col < SF_NUM_COLS; ++col) {
-                        target_text += (col < (int)cps.size()) ? cps[col] : " ";
-                    }
+                    auto deps_cps = sf_utf8_split(deps);
+                    for (auto &cp : deps_cps)
+                        new_target.push_back({cp, dl.deps_color});
                 }
             }
         } else {
-            target_text = sf_pad_line("No mode set!") +
-                          sf_pad_line("Go to https://ptrans.home.l3rchl.at");
+            new_target =
+                sf_pad_line("No mode set!", current_config->colors.fg_default) +
+                sf_pad_line("Go to https://ptrans.home.l3rchl.at",
+                            current_config->colors.fg_default);
         }
 
-        sf_update_cells(sf_cells_ptrans, sf_last_target_ptrans, target_text);
-        sf_render_cells(sf_cells_ptrans, sf_step);
+        sf_update_cells(cells, previous_target, new_target);
+        sf_render_cells(cells, step);
+
         offscreen = matrix->SwapOnVSync(offscreen);
     }
 }
