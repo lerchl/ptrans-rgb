@@ -188,49 +188,41 @@ int main(int argc, char *argv[]) {
     const int SF_COL_DIR =
         SF_NUM_COLS - SF_COL_LINE - SF_COL_DEPS - SF_COL_SPACE;
 
-    const Color SF_WHITE = {255, 255, 255};
+    const Color SF_BLACK = {0, 0, 0};
 
-    const std::vector<SFChar> SF_CHARSET = {
-        {" ", SF_WHITE},       {"█", {255, 80, 80}}, {"█", {255, 160, 0}},
-        {"█", {255, 255, 0}},  {"█", {80, 255, 80}}, {"█", {0, 200, 255}},
-        {"█", {160, 80, 255}}, {"A", SF_WHITE},      {"Ä", SF_WHITE},
-        {"B", SF_WHITE},       {"C", SF_WHITE},      {"D", SF_WHITE},
-        {"E", SF_WHITE},       {"F", SF_WHITE},      {"G", SF_WHITE},
-        {"H", SF_WHITE},       {"I", SF_WHITE},      {"J", SF_WHITE},
-        {"K", SF_WHITE},       {"L", SF_WHITE},      {"M", SF_WHITE},
-        {"N", SF_WHITE},       {"O", SF_WHITE},      {"Ö", SF_WHITE},
-        {"P", SF_WHITE},       {"Q", SF_WHITE},      {"R", SF_WHITE},
-        {"S", SF_WHITE},       {"T", SF_WHITE},      {"U", SF_WHITE},
-        {"Ü", SF_WHITE},       {"V", SF_WHITE},      {"W", SF_WHITE},
-        {"X", SF_WHITE},       {"Y", SF_WHITE},      {"Z", SF_WHITE},
-        {"a", SF_WHITE},       {"ä", SF_WHITE},      {"b", SF_WHITE},
-        {"c", SF_WHITE},       {"d", SF_WHITE},      {"e", SF_WHITE},
-        {"f", SF_WHITE},       {"g", SF_WHITE},      {"h", SF_WHITE},
-        {"i", SF_WHITE},       {"j", SF_WHITE},      {"k", SF_WHITE},
-        {"l", SF_WHITE},       {"m", SF_WHITE},      {"n", SF_WHITE},
-        {"o", SF_WHITE},       {"ö", SF_WHITE},      {"p", SF_WHITE},
-        {"q", SF_WHITE},       {"r", SF_WHITE},      {"s", SF_WHITE},
-        {"t", SF_WHITE},       {"u", SF_WHITE},      {"ü", SF_WHITE},
-        {"v", SF_WHITE},       {"w", SF_WHITE},      {"x", SF_WHITE},
-        {"y", SF_WHITE},       {"z", SF_WHITE},      {"0", SF_WHITE},
-        {"1", SF_WHITE},       {"2", SF_WHITE},      {"3", SF_WHITE},
-        {"4", SF_WHITE},       {"5", SF_WHITE},      {"6", SF_WHITE},
-        {"7", SF_WHITE},       {"8", SF_WHITE},      {"9", SF_WHITE},
-        {".", SF_WHITE},       {":", SF_WHITE},      {",", SF_WHITE},
-        {"!", SF_WHITE},       {"?", SF_WHITE},      {"-", SF_WHITE},
-        {"*", SF_WHITE},       {"\"", SF_WHITE},
+    const std::vector<SFChar> SF_BLOCK_CHARS = {
+        {"█", {255, 80, 80}}, {"█", {255, 160, 0}}, {"█", {255, 255, 0}},
+        {"█", {80, 255, 80}}, {"█", {0, 200, 255}}, {"█", {160, 80, 255}},
     };
-    const int SF_CHARSET_SIZE = (int)SF_CHARSET.size();
 
-    auto sf_charset_index = [&](const std::string &glyph, const Color &color) {
-        for (int i = 0; i < SF_CHARSET_SIZE; ++i)
-            if (SF_CHARSET[i].glyph == glyph &&
-                SF_CHARSET[i].color.r == color.r &&
-                SF_CHARSET[i].color.g == color.g &&
-                SF_CHARSET[i].color.b == color.b)
+    auto sf_charset = [&](const Color &color) {
+        std::vector<SFChar> cs;
+        cs.push_back({" ", color});
+        for (auto &b : SF_BLOCK_CHARS)
+            cs.push_back(b);
+        for (auto &g : std::vector<std::string>{
+                 "A", "Ä", "B", "C", "D", "E",  "F", "G", "H", "I", "J", "K",
+                 "L", "M", "N", "O", "Ö", "P",  "Q", "R", "S", "T", "U", "Ü",
+                 "V", "W", "X", "Y", "Z", "a",  "ä", "b", "c", "d", "e", "f",
+                 "g", "h", "i", "j", "k", "l",  "m", "n", "o", "ö", "p", "q",
+                 "r", "s", "ß", "t", "u", "ü",  "v", "w", "x", "y", "z", "0",
+                 "1", "2", "3", "4", "5", "6",  "7", "8", "9", ".", ",", ":",
+                 ";", " ", "!", "?", "-", "–",  "(", ")", "/", "@", "#", "%",
+                 "&", "=", "+", "_", "'", "\"", "$", "€",
+             })
+            cs.push_back({g, color});
+        return cs;
+    };
+
+    auto sf_charset_index = [&](const std::vector<SFChar> &charset,
+                                const std::string &glyph, const Color &color) {
+        int size = (int)charset.size();
+        for (int i = 0; i < size; ++i)
+            if (charset[i].glyph == glyph && charset[i].color.r == color.r &&
+                charset[i].color.g == color.g && charset[i].color.b == color.b)
                 return i;
-        for (int i = 0; i < SF_CHARSET_SIZE; ++i)
-            if (SF_CHARSET[i].glyph == glyph)
+        for (int i = 0; i < size; ++i)
+            if (charset[i].glyph == glyph)
                 return i;
         return 0;
     };
@@ -269,18 +261,19 @@ int main(int argc, char *argv[]) {
 
     auto sf_update_cells = [&](std::vector<SFCell> &cells,
                                std::vector<SFChar> &last_target,
-                               const std::vector<SFChar> &new_target) {
-        if (new_target == last_target) {
+                               const std::vector<SFChar> &new_target,
+                               const std::vector<SFChar> &charset) {
+        if (new_target == last_target)
             return;
-        }
         last_target = new_target;
+        int charset_size = (int)charset.size();
         for (int i = 0; i < SF_NUM_CELLS; ++i) {
             const SFChar &tc = (i < (int)new_target.size())
                                    ? new_target[i]
-                                   : SFChar{" ", SF_WHITE};
-            int ti = sf_charset_index(tc.glyph, tc.color);
+                                   : SFChar{" ", SF_BLACK};
+            int ti = sf_charset_index(charset, tc.glyph, tc.color);
             int steps =
-                (ti - cells[i].char_index + SF_CHARSET_SIZE) % SF_CHARSET_SIZE;
+                (ti - cells[i].char_index + charset_size) % charset_size;
             cells[i].target_index = ti;
             cells[i].target_fg_color =
                 rgb_matrix::Color(tc.color.r, tc.color.g, tc.color.b);
@@ -291,7 +284,9 @@ int main(int argc, char *argv[]) {
         }
     };
 
-    auto sf_render_cells = [&](std::vector<SFCell> &cells, bool step) {
+    auto sf_render_cells = [&](std::vector<SFCell> &cells, bool step,
+                               const std::vector<SFChar> &charset) {
+        int charset_size = (int)charset.size();
         for (int i = 0; i < SF_NUM_CELLS; ++i) {
             SFCell &cell = cells[i];
             int row = i / SF_NUM_COLS;
@@ -299,12 +294,12 @@ int main(int argc, char *argv[]) {
             int px = 1 + col * (SF_CELL_W + SF_CELL_GAP);
             int py = font.baseline() + row * SF_CELL_H;
 
-            const SFChar &sc = SF_CHARSET[cell.char_index];
+            const SFChar &sc = charset[cell.char_index];
             rgb_matrix::DrawText(offscreen, font, px, py, cell.current_fg_color,
                                  nullptr, sc.glyph.c_str());
 
             if (cell.flipping && step) {
-                cell.char_index = (cell.char_index + 1) % SF_CHARSET_SIZE;
+                cell.char_index = (cell.char_index + 1) % charset_size;
                 cell.steps_left--;
                 if (cell.steps_left <= 0) {
                     cell.char_index = cell.target_index;
@@ -458,8 +453,9 @@ int main(int argc, char *argv[]) {
                             current_config->colors.fg_default);
         }
 
-        sf_update_cells(cells, previous_target, new_target);
-        sf_render_cells(cells, step);
+        auto charset = sf_charset(current_config->colors.fg_default);
+        sf_update_cells(cells, previous_target, new_target, charset);
+        sf_render_cells(cells, step, charset);
 
         offscreen = matrix->SwapOnVSync(offscreen);
     }
