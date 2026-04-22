@@ -258,7 +258,8 @@ int main(int argc, char *argv[]) {
         int target_index = 0;
         int steps_left = 0;
         bool flipping = false;
-        rgb_matrix::Color fg_color = rgb_matrix::Color(255, 255, 255);
+        rgb_matrix::Color target_fg_color = rgb_matrix::Color(255, 255, 255);
+        rgb_matrix::Color current_fg_color = rgb_matrix::Color(255, 255, 255);
     };
 
     std::vector<SFCell> cells(SF_NUM_CELLS);
@@ -269,8 +270,9 @@ int main(int argc, char *argv[]) {
     auto sf_update_cells = [&](std::vector<SFCell> &cells,
                                std::vector<SFChar> &last_target,
                                const std::vector<SFChar> &new_target) {
-        if (new_target == last_target)
+        if (new_target == last_target) {
             return;
+        }
         last_target = new_target;
         for (int i = 0; i < SF_NUM_CELLS; ++i) {
             const SFChar &tc = (i < (int)new_target.size())
@@ -280,8 +282,12 @@ int main(int argc, char *argv[]) {
             int steps =
                 (ti - cells[i].char_index + SF_CHARSET_SIZE) % SF_CHARSET_SIZE;
             cells[i].target_index = ti;
+            cells[i].target_fg_color =
+                rgb_matrix::Color(tc.color.r, tc.color.g, tc.color.b);
             cells[i].steps_left = steps;
             cells[i].flipping = (steps > 0);
+            if (steps == 0)
+                cells[i].current_fg_color = cells[i].target_fg_color;
         }
     };
 
@@ -294,8 +300,8 @@ int main(int argc, char *argv[]) {
             int py = font.baseline() + row * SF_CELL_H;
 
             const SFChar &sc = SF_CHARSET[cell.char_index];
-            rgb_matrix::DrawText(offscreen, font, px, py, sc.color, nullptr,
-                                 sc.glyph.c_str());
+            rgb_matrix::DrawText(offscreen, font, px, py, cell.current_fg_color,
+                                 nullptr, sc.glyph.c_str());
 
             if (cell.flipping && step) {
                 cell.char_index = (cell.char_index + 1) % SF_CHARSET_SIZE;
@@ -355,13 +361,15 @@ int main(int argc, char *argv[]) {
             } else {
                 auto departure_color = [&](bool real_time, bool late,
                                            bool traffic_jam) -> Color {
-                    if (!real_time)
+                    if (!real_time) {
                         return current_config->colors.fg_default;
-                    if (traffic_jam)
+                    } else if (traffic_jam) {
                         return current_config->colors.fg_traffic;
-                    if (late)
+                    } else if (late) {
                         return current_config->colors.fg_late;
-                    return current_config->colors.fg_punctual;
+                    } else {
+                        return current_config->colors.fg_punctual;
+                    }
                 };
 
                 struct DepEntry {
@@ -421,18 +429,25 @@ int main(int argc, char *argv[]) {
                     // SF_COL_DEPS columns
                     std::vector<SFChar> dep_cells;
                     for (int d = 0; d < (int)dl.deps.size(); ++d) {
-                        if (d > 0)
+                        if (d > 0) {
                             dep_cells.push_back(
                                 {" ", current_config->colors.fg_default});
-                        for (auto &cp : sf_utf8_split(dl.deps[d].str))
+                        }
+
+                        for (auto &cp : sf_utf8_split(dl.deps[d].str)) {
                             dep_cells.push_back({cp, dl.deps[d].color});
+                        }
                     }
+
                     int pad = SF_COL_DEPS - (int)dep_cells.size();
-                    for (int p = 0; p < pad; ++p)
+                    for (int p = 0; p < pad; ++p) {
                         new_target.push_back(
                             {" ", current_config->colors.fg_default});
-                    for (auto &c : dep_cells)
+                    }
+
+                    for (auto &c : dep_cells) {
                         new_target.push_back(c);
+                    }
                 }
             }
         } else {
