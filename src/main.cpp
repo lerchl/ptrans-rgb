@@ -40,7 +40,7 @@ std::thread timetable_job_thread;
 
 struct SFChar {
     std::string glyph;
-    std::optional<Color> color;
+    Color color;
 };
 
 bool operator==(const Color &a, const Color &b) {
@@ -83,9 +83,11 @@ static int usage(const char *progname) {
 
 std::string pad_utf8(const std::string &s, size_t width) {
     size_t codepoints = 0;
-    for (unsigned char c : s)
-        if ((c & 0xC0) != 0x80)
+    for (unsigned char c : s) {
+        if ((c & 0xC0) != 0x80) {
             codepoints++;
+        }
+    }
     size_t padding = (codepoints < width) ? width - codepoints : 0;
     return s + std::string(padding, ' ');
 }
@@ -194,18 +196,17 @@ int main(int argc, char *argv[]) {
     const Color SF_BLACK = {0, 0, 0};
 
     const std::vector<SFChar> SF_BLOCK_CHARS = {
-        {"█", std::make_optional(Color{255, 80, 80})},
-        {"█", std::make_optional(Color{255, 160, 0})},
-        {"█", std::make_optional(Color{255, 255, 0})},
-        {"█", std::make_optional(Color{80, 255, 80})},
-        {"█", std::make_optional(Color{0, 200, 255})},
-        {"█", std::make_optional(Color{160, 80, 255})},
+        {"█", {255, 80, 80}}, {"█", {255, 160, 0}}, {"█", {255, 255, 0}},
+        {"█", {80, 255, 80}}, {"█", {0, 200, 255}}, {"█", {160, 80, 255}},
     };
 
-    auto sf_charset = [&]() {
+    // charset is built with the current fg_default so normal glyphs carry that
+    // color. Block chars always keep their fixed colors.
+    auto sf_charset = [&](const Color &fg_default) {
         std::vector<SFChar> cs;
-        for (auto &b : SF_BLOCK_CHARS)
+        for (auto &b : SF_BLOCK_CHARS) {
             cs.push_back(b);
+        }
         for (auto &g : std::vector<std::string>{
                  " ", "A", "Ä", "B", "C", "D", "E",  "F", "G", "H", "I", "J",
                  "K", "L", "M", "N", "O", "Ö", "P",  "Q", "R", "S", "T", "U",
@@ -215,21 +216,20 @@ int main(int argc, char *argv[]) {
                  "0", "1", "2", "3", "4", "5", "6",  "7", "8", "9", ".", ",",
                  ":", ";", " ", "!", "?", "-", "–",  "(", ")", "/", "@", "#",
                  "%", "&", "=", "+", "_", "'", "\"", "$", "€",
-             })
-            cs.push_back({g, std::nullopt});
+             }) {
+            cs.push_back({g, fg_default});
+        }
         return cs;
     };
 
     auto sf_charset_index = [&](const std::vector<SFChar> &charset,
                                 const std::string &glyph) {
         int size = (int)charset.size();
-
         for (int i = 0; i < size; ++i) {
             if (charset[i].glyph == glyph) {
                 return i;
             }
         }
-
         return 0;
     };
 
@@ -239,12 +239,13 @@ int main(int argc, char *argv[]) {
         while (i < s.size()) {
             unsigned char c = s[i];
             int len = 1;
-            if ((c & 0xE0) == 0xC0)
+            if ((c & 0xE0) == 0xC0) {
                 len = 2;
-            else if ((c & 0xF0) == 0xE0)
+            } else if ((c & 0xF0) == 0xE0) {
                 len = 3;
-            else if ((c & 0xF8) == 0xF0)
+            } else if ((c & 0xF8) == 0xF0) {
                 len = 4;
+            }
             result.push_back(s.substr(i, len));
             i += len;
         }
@@ -256,8 +257,7 @@ int main(int argc, char *argv[]) {
         int target_index = 0;
         int steps_left = 0;
         bool flipping = false;
-        rgb_matrix::Color target_fg_color = rgb_matrix::Color(255, 255, 255);
-        rgb_matrix::Color current_fg_color = rgb_matrix::Color(255, 255, 255);
+        rgb_matrix::Color target_color = rgb_matrix::Color(255, 255, 255);
     };
 
     std::vector<SFCell> cells(SF_NUM_CELLS);
@@ -265,38 +265,38 @@ int main(int argc, char *argv[]) {
 
     auto sf_last_step = std::chrono::steady_clock::now();
 
-    auto sf_update_cells =
-        [&](std::vector<SFCell> &cells, std::vector<SFChar> &last_target,
-            const std::vector<SFChar> &new_target,
-            const std::vector<SFChar> &charset,
-            const std::shared_ptr<Configuration> configuration) {
-            if (new_target == last_target) {
-                return;
-            }
-
-            last_target = new_target;
-            int charset_size = (int)charset.size();
-            for (int i = 0; i < SF_NUM_CELLS; ++i) {
-                const SFChar &tc = (i < (int)new_target.size())
-                                       ? new_target[i]
-                                       : SFChar{" ", SF_BLACK};
-                int ti = sf_charset_index(charset, tc.glyph);
-                int steps =
-                    (ti - cells[i].char_index + charset_size) % charset_size;
-                cells[i].target_index = ti;
-                cells[i].target_fg_color =
-                    tc.color.value_or(configuration->colors.fg_default);
-                cells[i].steps_left = steps;
-                cells[i].flipping = (steps > 0);
-                if (steps == 0) {
-                    cells[i].current_fg_color = cells[i].target_fg_color;
-                }
-            }
-        };
-
-    auto sf_render_cells = [&](std::vector<SFCell> &cells, bool step,
+    auto sf_update_cells = [&](std::vector<SFCell> &cells,
+                               std::vector<SFChar> &last_target,
+                               const std::vector<SFChar> &new_target,
                                const std::vector<SFChar> &charset) {
+        if (new_target == last_target) {
+            return;
+        }
+
+        last_target = new_target;
         int charset_size = (int)charset.size();
+        for (int i = 0; i < SF_NUM_CELLS; ++i) {
+            const SFChar &tc = (i < (int)new_target.size())
+                                   ? new_target[i]
+                                   : SFChar{" ", SF_BLACK};
+            int ti = sf_charset_index(charset, tc.glyph);
+            int steps =
+                (ti - cells[i].char_index + charset_size) % charset_size;
+            cells[i].target_index = ti;
+            cells[i].target_color =
+                rgb_matrix::Color(tc.color.r, tc.color.g, tc.color.b);
+            cells[i].steps_left = steps;
+            cells[i].flipping = (steps > 0);
+        }
+    };
+
+    // During a flip the cell cycles through charset glyphs. Intermediate glyphs
+    // are drawn in fg_default; only the final target glyph gets target_color.
+    auto sf_render_cells = [&](std::vector<SFCell> &cells, bool step,
+                               const std::vector<SFChar> &charset,
+                               const Color &fg_default) {
+        int charset_size = (int)charset.size();
+        rgb_matrix::Color default_rgb(fg_default.r, fg_default.g, fg_default.b);
         for (int i = 0; i < SF_NUM_CELLS; ++i) {
             SFCell &cell = cells[i];
             int row = i / SF_NUM_COLS;
@@ -304,16 +304,20 @@ int main(int argc, char *argv[]) {
             int px = 1 + col * (SF_CELL_W + SF_CELL_GAP);
             int py = font.baseline() + row * SF_CELL_H;
 
+            // Use target color only when settled on the target glyph,
+            // otherwise use fg_default for intermediate flip frames.
+            rgb_matrix::Color draw_color =
+                cell.flipping ? default_rgb : cell.target_color;
+
             const SFChar &sc = charset[cell.char_index];
-            rgb_matrix::DrawText(offscreen, font, px, py, cell.current_fg_color,
-                                 nullptr, sc.glyph.c_str());
+            rgb_matrix::DrawText(offscreen, font, px, py, draw_color, nullptr,
+                                 sc.glyph.c_str());
 
             if (cell.flipping && step) {
                 cell.char_index = (cell.char_index + 1) % charset_size;
                 cell.steps_left--;
                 if (cell.steps_left <= 0) {
                     cell.char_index = cell.target_index;
-                    cell.current_fg_color = cell.target_fg_color;
                     cell.flipping = false;
                 }
             }
@@ -339,8 +343,9 @@ int main(int argc, char *argv[]) {
         bool step = std::chrono::duration_cast<std::chrono::milliseconds>(
                         now - sf_last_step)
                         .count() >= SF_MS_PER_STEP;
-        if (step)
+        if (step) {
             sf_last_step = now;
+        }
 
         std::vector<SFChar> new_target;
 
@@ -427,9 +432,10 @@ int main(int argc, char *argv[]) {
                     std::string prefix = std::format(
                         "{:<{}} {:<{}} ", dl.line_name, SF_COL_LINE,
                         pad_utf8(dl.direction, SF_COL_DIR), SF_COL_DIR);
-                    for (auto &cp : sf_utf8_split(prefix))
+                    for (auto &cp : sf_utf8_split(prefix)) {
                         new_target.push_back(
                             {cp, current_config->colors.fg_default});
+                    }
 
                     // departure times, each in its own color, right-aligned in
                     // SF_COL_DEPS columns
@@ -463,10 +469,10 @@ int main(int argc, char *argv[]) {
                             current_config->colors.fg_default);
         }
 
-        auto charset = sf_charset();
-        sf_update_cells(cells, previous_target, new_target, charset,
-                        current_config);
-        sf_render_cells(cells, step, charset);
+        auto charset = sf_charset(current_config->colors.fg_default);
+        sf_update_cells(cells, previous_target, new_target, charset);
+        sf_render_cells(cells, step, charset,
+                        current_config->colors.fg_default);
 
         offscreen = matrix->SwapOnVSync(offscreen);
     }
