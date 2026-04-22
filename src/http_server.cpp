@@ -56,11 +56,18 @@ make_http_server(const char *app_version,
                 }
 
                 if (patch.mode) {
+                    // TODO: Validation
                     config->mode = *patch.mode;
                 }
 
                 if (patch.blackout_window) {
+                    // TODO: Validation
                     config->blackout_window = *patch.blackout_window;
+                }
+
+                if (patch.colors) {
+                    // TODO: Validation
+                    config->colors = *patch.colors;
                 }
 
                 configuration.store(config, std::memory_order_release);
