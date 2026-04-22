@@ -364,35 +364,34 @@ int main(int argc, char *argv[]) {
                     return current_config->colors.fg_punctual;
                 };
 
+                struct DepEntry {
+                    std::string str;
+                    Color color;
+                };
                 struct DisplayLine {
                     std::string line_name;
                     std::string direction;
-                    std::string deps_str;
-                    Color deps_color;
+                    std::vector<DepEntry> deps;
                 };
 
                 std::vector<DisplayLine> display_lines;
 
-                for (int i : std::views::iota(0, (int)tt->trips.size())) {
-                    auto &trip = tt->trips[i];
+                for (auto &trip : tt->trips) {
                     DisplayLine dl;
                     dl.line_name = trip.line;
                     dl.direction = trip.direction;
 
-                    if (trip.departures.empty()) {
-                        dl.deps_str = "N/A";
-                        dl.deps_color = current_config->colors.fg_default;
-                    } else {
-                        for (auto &&dep :
-                             trip.departures | std::views::take(3)) {
-                            std::string s = dep.countdown == 0
-                                                ? "*"
-                                                : std::to_string(dep.countdown);
-                            dl.deps_str += (dl.deps_str.empty() ? "" : " ") + s;
-                        }
-                        auto &d = trip.departures[0];
-                        dl.deps_color =
-                            departure_color(d.real_time, d.late, d.traffic_jam);
+                    for (auto &&dep : trip.departures | std::views::take(3)) {
+                        std::string s = dep.countdown == 0
+                                            ? "*"
+                                            : std::to_string(dep.countdown);
+                        dl.deps.push_back(
+                            {s, departure_color(dep.real_time, dep.late,
+                                                dep.traffic_jam)});
+                    }
+                    if (dl.deps.empty()) {
+                        dl.deps.push_back(
+                            {"N/A", current_config->colors.fg_default});
                     }
 
                     display_lines.push_back(dl);
@@ -414,102 +413,26 @@ int main(int argc, char *argv[]) {
                     std::string prefix = std::format(
                         "{:<{}} {:<{}} ", dl.line_name, SF_COL_LINE,
                         pad_utf8(dl.direction, SF_COL_DIR), SF_COL_DIR);
-                    auto prefix_cps = sf_utf8_split(prefix);
-                    for (auto &cp : prefix_cps)
+                    for (auto &cp : sf_utf8_split(prefix))
                         new_target.push_back(
                             {cp, current_config->colors.fg_default});
 
-                    // departure times in their own color
-                    std::string deps =
-                        std::format("{:>{}}", dl.deps_str, SF_COL_DEPS);
-                    auto tt = timetable.load(std::memory_order_acquire);
-                    if (!tt) {
-                        new_target =
-                            sf_pad_line("No timetable available",
-                                        current_config->colors.fg_default);
-                    } else {
-                        auto departure_color = [&](bool real_time, bool late,
-                                                   bool traffic_jam) -> Color {
-                            if (!real_time)
-                                return current_config->colors.fg_default;
-                            if (traffic_jam)
-                                return current_config->colors.fg_traffic;
-                            if (late)
-                                return current_config->colors.fg_late;
-                            return current_config->colors.fg_punctual;
-                        };
-
-                        struct DisplayLine {
-                            std::string line_name;
-                            std::string direction;
-                            std::string deps_str;
-                            Color deps_color;
-                        };
-
-                        std::vector<DisplayLine> display_lines;
-
-                        for (int i :
-                             std::views::iota(0, (int)tt->trips.size())) {
-                            auto &trip = tt->trips[i];
-                            DisplayLine dl;
-                            dl.line_name = trip.line;
-                            dl.direction = trip.direction;
-
-                            if (trip.departures.empty()) {
-                                dl.deps_str = "N/A";
-                                dl.deps_color =
-                                    current_config->colors.fg_default;
-                            } else {
-                                for (auto &&dep :
-                                     trip.departures | std::views::take(3)) {
-                                    std::string s =
-                                        dep.countdown == 0
-                                            ? "*"
-                                            : std::to_string(dep.countdown);
-                                    dl.deps_str +=
-                                        (dl.deps_str.empty() ? "" : " ") + s;
-                                }
-                                auto &d = trip.departures[0];
-                                dl.deps_color = departure_color(
-                                    d.real_time, d.late, d.traffic_jam);
-                            }
-
-                            display_lines.push_back(dl);
-                        }
-
-                        new_target.clear();
-                        for (int row = 0; row < SF_NUM_ROWS; ++row) {
-                            if (row >= (int)display_lines.size()) {
-                                auto padding = sf_pad_line(
-                                    "", current_config->colors.fg_default);
-                                new_target.insert(new_target.end(),
-                                                  padding.begin(),
-                                                  padding.end());
-                                continue;
-                            }
-
-                            auto &dl = display_lines[row];
-
-                            // line name + direction in default color
-                            std::string prefix = std::format(
-                                "{:<{}} {:<{}} ", dl.line_name, SF_COL_LINE,
-                                pad_utf8(dl.direction, SF_COL_DIR), SF_COL_DIR);
-                            auto prefix_cps = sf_utf8_split(prefix);
-                            for (auto &cp : prefix_cps)
-                                new_target.push_back(
-                                    {cp, current_config->colors.fg_default});
-
-                            // departure times in their own color
-                            std::string deps =
-                                std::format("{:>{}}", dl.deps_str, SF_COL_DEPS);
-                            auto deps_cps = sf_utf8_split(deps);
-                            for (auto &cp : deps_cps)
-                                new_target.push_back({cp, dl.deps_color});
-                        }
+                    // departure times, each in its own color, right-aligned in
+                    // SF_COL_DEPS columns
+                    std::vector<SFChar> dep_cells;
+                    for (int d = 0; d < (int)dl.deps.size(); ++d) {
+                        if (d > 0)
+                            dep_cells.push_back(
+                                {" ", current_config->colors.fg_default});
+                        for (auto &cp : sf_utf8_split(dl.deps[d].str))
+                            dep_cells.push_back({cp, dl.deps[d].color});
                     }
-                    auto deps_cps = sf_utf8_split(deps);
-                    for (auto &cp : deps_cps)
-                        new_target.push_back({cp, dl.deps_color});
+                    int pad = SF_COL_DEPS - (int)dep_cells.size();
+                    for (int p = 0; p < pad; ++p)
+                        new_target.push_back(
+                            {" ", current_config->colors.fg_default});
+                    for (auto &c : dep_cells)
+                        new_target.push_back(c);
                 }
             }
         } else {
