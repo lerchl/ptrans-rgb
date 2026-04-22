@@ -318,8 +318,9 @@ int main(int argc, char *argv[]) {
             int py = font.baseline() + row * SF_CELL_H;
 
             // Use target color only when settled on the target glyph.
-            rgb_matrix::Color draw_color =
-                cell.flipping ? charset[cell.char_index].color : cell.target_color;
+            rgb_matrix::Color draw_color = cell.flipping
+                                               ? charset[cell.char_index].color
+                                               : cell.target_color;
 
             const SFChar &sc = charset[cell.char_index];
             rgb_matrix::DrawText(offscreen, font, px, py, draw_color, nullptr,
@@ -349,13 +350,14 @@ int main(int argc, char *argv[]) {
     for (;;) {
         auto current_config = configuration.load(std::memory_order_acquire);
 
+        matrix->SetBrightness(current_config->brightness);
+        offscreen->Fill(bg_color.r, bg_color.g, bg_color.b);
+
         if (current_config->blackout_window->isDuringBlackout(nowTime())) {
+            offscreen = matrix->SwapOnVSync(offscreen);
             std::this_thread::sleep_for(std::chrono::seconds(1));
             continue;
         }
-
-        matrix->SetBrightness(current_config->brightness);
-        offscreen->Fill(bg_color.r, bg_color.g, bg_color.b);
 
         auto now = std::chrono::steady_clock::now();
         bool step = std::chrono::duration_cast<std::chrono::milliseconds>(
