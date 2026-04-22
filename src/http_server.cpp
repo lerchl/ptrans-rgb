@@ -18,7 +18,7 @@ make_http_server(const char *app_version,
                                                 const int port) {
         server.set_default_headers({
             {"Access-Control-Allow-Origin", "*"},
-            {"Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS"},
+            {"Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS"},
             {"Access-Control-Allow-Headers", "Content-Type"},
         });
 
