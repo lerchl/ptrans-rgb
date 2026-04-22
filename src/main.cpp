@@ -293,10 +293,8 @@ int main(int argc, char *argv[]) {
     // During a flip the cell cycles through charset glyphs. Intermediate glyphs
     // are drawn in fg_default; only the final target glyph gets target_color.
     auto sf_render_cells = [&](std::vector<SFCell> &cells, bool step,
-                               const std::vector<SFChar> &charset,
-                               const Color &fg_default) {
+                               const std::vector<SFChar> &charset) {
         int charset_size = (int)charset.size();
-        rgb_matrix::Color default_rgb(fg_default.r, fg_default.g, fg_default.b);
         for (int i = 0; i < SF_NUM_CELLS; ++i) {
             SFCell &cell = cells[i];
             int row = i / SF_NUM_COLS;
@@ -304,10 +302,9 @@ int main(int argc, char *argv[]) {
             int px = 1 + col * (SF_CELL_W + SF_CELL_GAP);
             int py = font.baseline() + row * SF_CELL_H;
 
-            // Use target color only when settled on the target glyph,
-            // otherwise use fg_default for intermediate flip frames.
+            // Use target color only when settled on the target glyph.
             rgb_matrix::Color draw_color =
-                cell.flipping ? default_rgb : cell.target_color;
+                cell.flipping ? charset[cell.char_index].color : cell.target_color;
 
             const SFChar &sc = charset[cell.char_index];
             rgb_matrix::DrawText(offscreen, font, px, py, draw_color, nullptr,
@@ -471,8 +468,7 @@ int main(int argc, char *argv[]) {
 
         auto charset = sf_charset(current_config->colors.fg_default);
         sf_update_cells(cells, previous_target, new_target, charset);
-        sf_render_cells(cells, step, charset,
-                        current_config->colors.fg_default);
+        sf_render_cells(cells, step, charset);
 
         offscreen = matrix->SwapOnVSync(offscreen);
     }
