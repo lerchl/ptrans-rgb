@@ -341,12 +341,11 @@ int main(int argc, char *argv[]) {
                                          current_config->colors.fg_default);
             } else {
                 auto cps = sf_utf8_split(*t);
-                new_target = std::views::iota(0, SF_NUM_CELLS) |
-                             std::views::transform([&](int i) -> SFChar {
-                                 return {(i < (int)cps.size()) ? cps[i] : " ",
-                                         current_config->colors.fg_default};
-                             }) |
-                             std::ranges::to<std::vector>();
+                new_target.resize(SF_NUM_CELLS);
+                for (int i = 0; i < SF_NUM_CELLS; ++i) {
+                    new_target[i] = {i < std::ssize(cps) ? cps[i] : " ",
+                                     current_config->colors.fg_default};
+                }
             }
         } else if (current_config->mode == PTRANS) {
             auto tt = timetable.load(std::memory_order_acquire);
