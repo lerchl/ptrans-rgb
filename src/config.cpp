@@ -32,10 +32,11 @@ bool BlackoutWindow::isDuringBlackout(const Time &time) const {
 void from_json(const json &j, BlackoutWindow &b) {
     b.start = j.at("start").get<Time>();
     b.end = j.at("end").get<Time>();
+    b.override = j.at("override").get<bool>();
 }
 
 void to_json(json &j, const BlackoutWindow &b) {
-    j = json{{"start", b.start}, {"end", b.end}};
+    j = json{{"start", b.start}, {"end", b.end}, {"override", b.override}};
 }
 
 void from_json(const json &j, Color &c) {
@@ -65,17 +66,24 @@ void to_json(json &j, const Colors &c) {
 Color::operator rgb_matrix::Color() const { return rgb_matrix::Color(r, g, b); }
 
 void from_json(const json &j, PatchConfigurationDto &p) {
-    if (j.contains("brightness"))
+    if (j.contains("brightness")) {
         p.brightness = j.at("brightness").get<int>();
+    }
 
-    if (j.contains("mode"))
+    if (j.contains("mode")) {
         p.mode = j.at("mode").get<Mode>();
+    }
 
-    if (j.contains("blackoutWindow"))
-        p.blackout_window = j.at("blackoutWindow").get<BlackoutWindow>();
-
-    if (j.contains("colors"))
+    if (j.contains("blackoutWindow")) {
+        if (j.at("blackoutWindow").is_null()) {
+            p.blackout_window = std::nullopt;
+        } else {
+            p.blackout_window = j.at("blackoutWindow").get<BlackoutWindow>();
+        }
+    }
+    if (j.contains("colors")) {
         p.colors = j.at("colors").get<Colors>();
+    }
 }
 
 void to_json(json &j, const Configuration &c) {
