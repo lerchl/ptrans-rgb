@@ -169,7 +169,7 @@ int main(int argc, char *argv[]) {
             .brightness = 80,
             .blackout_window = {.start = {.hour = 0, .minute = 0},
                                 .end = {.hour = 0, .minute = 0},
-                                .override = true},
+                                .override = false},
             .colors = {.fg_default = {.r = 100, .g = 0, .b = 255},
                        .fg_late = {.r = 255, .g = 0, .b = 0},
                        .fg_traffic = {.r = 255, .g = 100, .b = 0},
