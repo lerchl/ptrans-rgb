@@ -75,12 +75,9 @@ void from_json(const json &j, PatchConfigurationDto &p) {
     }
 
     if (j.contains("blackoutWindow")) {
-        if (j.at("blackoutWindow").is_null()) {
-            p.blackout_window = std::nullopt;
-        } else {
-            p.blackout_window = j.at("blackoutWindow").get<BlackoutWindow>();
-        }
+        p.blackout_window = j.at("blackoutWindow").get<BlackoutWindow>();
     }
+
     if (j.contains("colors")) {
         p.colors = j.at("colors").get<Colors>();
     }
