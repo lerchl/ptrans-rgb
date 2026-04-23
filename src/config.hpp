@@ -48,7 +48,7 @@ void to_json(json &j, const Colors &c);
 struct Configuration {
     Mode mode;
     int brightness;
-    std::optional<BlackoutWindow> blackout_window;
+    BlackoutWindow blackout_window;
     Colors colors;
 };
 

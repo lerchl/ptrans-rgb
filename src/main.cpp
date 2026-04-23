@@ -11,7 +11,6 @@
 #include <iostream>
 #include <memory>
 #include <nlohmann/json.hpp>
-#include <optional>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -168,7 +167,9 @@ int main(int argc, char *argv[]) {
         std::make_shared<Configuration>(Configuration{
             .mode = PTRANS,
             .brightness = 80,
-            .blackout_window = std::nullopt,
+            .blackout_window = {.start = {.hour = 0, .minute = 0},
+                                .end = {.hour = 0, .minute = 0},
+                                .override = true},
             .colors = {.fg_default = {.r = 100, .g = 0, .b = 255},
                        .fg_late = {.r = 255, .g = 0, .b = 0},
                        .fg_traffic = {.r = 255, .g = 100, .b = 0},
@@ -353,7 +354,7 @@ int main(int argc, char *argv[]) {
         matrix->SetBrightness(current_config->brightness);
         offscreen->Fill(bg_color.r, bg_color.g, bg_color.b);
 
-        if (current_config->blackout_window->isDuringBlackout(nowTime())) {
+        if (current_config->blackout_window.isDuringBlackout(nowTime())) {
             offscreen = matrix->SwapOnVSync(offscreen);
             std::this_thread::sleep_for(std::chrono::seconds(1));
             continue;
