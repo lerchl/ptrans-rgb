@@ -19,7 +19,7 @@ $(RGB_LIBRARY):
 
 build/obj/%.o: src/%.cpp
 	mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+	$(CXX) $(CXXFLAGS) $(DEFINES) $(INCLUDES) -c $< -o $@
 
 build_folder:
 	rm -rf build
