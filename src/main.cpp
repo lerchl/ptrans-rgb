@@ -349,6 +349,7 @@ int main(int argc, char *argv[]) {
     };
 
     for (;;) {
+        auto frame_start = std::chrono::steady_clock::now();
         auto current_config = configuration.load(std::memory_order_acquire);
 
         matrix->SetBrightness(current_config->brightness);
@@ -360,12 +361,12 @@ int main(int argc, char *argv[]) {
             continue;
         }
 
-        auto now = std::chrono::steady_clock::now();
         bool step = std::chrono::duration_cast<std::chrono::milliseconds>(
-                        now - sf_last_step)
+                        frame_start - sf_last_step)
                         .count() >= SF_MS_PER_STEP;
+
         if (step) {
-            sf_last_step = now;
+            sf_last_step = frame_start;
         }
 
         std::vector<SFChar> new_target;
@@ -495,5 +496,12 @@ int main(int argc, char *argv[]) {
         sf_render_cells(cells, step, charset);
 
         offscreen = matrix->SwapOnVSync(offscreen);
+
+        // Sleep for whatever remains of the step budget to avoid spinning
+        auto elapsed = std::chrono::steady_clock::now() - frame_start;
+        auto remaining = std::chrono::milliseconds(SF_MS_PER_STEP) - elapsed;
+        if (remaining > std::chrono::milliseconds(0)) {
+            std::this_thread::sleep_for(remaining);
+        }
     }
 }
