@@ -1,0 +1,45 @@
+#include <condition_variable>
+#include <nlohmann/json.hpp>
+#include <optional>
+#include <string>
+
+using json = nlohmann::json;
+
+struct DepartureDto {
+    std::optional<std::string> direction;
+    int countdown;
+    bool real_time;
+    bool late;
+    bool traffic_jam;
+};
+
+void from_json(const json &j, DepartureDto &d);
+
+struct TripDto {
+    std::string line;
+    std::string direction;
+    int foot_minutes_to_station;
+    std::vector<DepartureDto> departures;
+};
+
+void from_json(const json &j, TripDto &t);
+
+struct TimetableDto {
+    std::vector<TripDto> trips;
+    std::optional<std::string> message;
+};
+
+void from_json(const json &j, TimetableDto &tt);
+TimetableDto parse_tiretable(const std::string &body);
+
+struct ErrorDto {
+    std::string message;
+};
+
+void from_json(const json &j, ErrorDto &e);
+ErrorDto parse_error(const std::string &body);
+
+std::function<void(std::string)>
+make_timetable_job(std::condition_variable &app_cv, std::mutex &app_mutex,
+                   std::atomic<bool> &app_running,
+                   std::atomic<std::shared_ptr<TimetableDto>> &timetable);

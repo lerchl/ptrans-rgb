@@ -1,44 +1,49 @@
 name: Build ARM64 executable
-
 on:
   push:
     branches:
       - main
-
+      - develop
 permissions:
   contents: write
-
 jobs:
   build:
     runs-on: ubuntu-22.04-arm
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: recursive
-
       - name: Install dependencies
         run: |
           sudo add-apt-repository ppa:ubuntu-toolchain-r/test -y
           sudo apt-get update
           sudo apt-get install -y gcc-13 g++-13 make libssl-dev
           sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-13 100
-
       - name: Get version
         run: |
           VERSION=$(grep -m1 "VERSION" Makefile | sed "s/.*= *//")
           echo "VERSION=$VERSION" >> $GITHUB_ENV
-
-      - name: Build
+      - name: Build (develop)
+        if: github.ref == 'refs/heads/develop'
+        run: make dev CXX=g++-13 CC=gcc-13
+      - name: Build (main)
+        if: github.ref == 'refs/heads/main'
         run: make prod CXX=g++-13 CC=gcc-13
-
       - name: Rename binary
         run: |
           cp build/ptrans-rgb ptrans-rgb-linux-aarch64
-
       - name: Create GitHub Release and upload binary
+        if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ env.VERSION }}
           name: v${{ env.VERSION }}
           files: ptrans-rgb-linux-aarch64
           make_latest: true
+      - name: Upload dev artifact
+        if: github.ref == 'refs/heads/develop'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ptrans-rgb-dev-${{ github.sha }}
+          path: ptrans-rgb-linux-aarch64
+          retention-days: 7
