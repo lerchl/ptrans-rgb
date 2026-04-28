@@ -219,11 +219,15 @@ int main(int argc, char *argv[]) {
 
     // charset is built with the current fg_default so normal glyphs carry that
     // color. Block chars always keep their fixed colors.
-    auto sf_charset = [&](const Color &fg_default) {
+    auto sf_charset = [&](const Color &fg_default, bool block_chars = true) {
         std::vector<SFChar> cs;
-        for (auto &b : SF_BLOCK_CHARS) {
-            cs.push_back(b);
+
+        if (block_chars) {
+            for (auto &b : SF_BLOCK_CHARS) {
+                cs.push_back(b);
+            }
         }
+
         for (auto &g : std::vector<std::string>{
                  " ", "A", "Ä", "B", "C", "D", "E",  "F", "G", "H", "I", "J",
                  "K", "L", "M", "N", "O", "Ö", "P",  "Q", "R", "S", "T", "U",
@@ -235,6 +239,7 @@ int main(int argc, char *argv[]) {
                  "%", "&", "=", "+", "_", "'", "\"", "$", "€", "*"}) {
             cs.push_back({g, fg_default});
         }
+
         return cs;
     };
 
@@ -387,7 +392,6 @@ int main(int argc, char *argv[]) {
             sf_last_step = frame_start;
         }
 
-        auto charset = sf_charset(current_config->colors.fg_default);
         std::vector<SFChar> new_target;
 
         if (current_config->mode == TEXT) {
@@ -408,57 +412,57 @@ int main(int argc, char *argv[]) {
         } else if (current_config->mode == PTRANS) {
             auto tt = timetable.load(std::memory_order_acquire);
             if (!tt) {
-                if (!tt) {
-                    const int charset_size = (int)charset.size();
+                const auto charset =
+                    sf_charset(current_config->colors.fg_default, false);
+                const int charset_size = (int)charset.size();
+                const int perimeter_len = 2 * (SF_NUM_ROWS + SF_NUM_COLS) - 4;
 
-                    // Find the charset index of 'A' as the frame start
-                    int a_idx = sf_charset_index(charset, "A");
+                static int frame_t = 0;
+                static int revealed = 0;
+                frame_t++;
+                if (revealed < perimeter_len)
+                    revealed++;
 
-                    static int frame_t = 0;
-                    frame_t++;
+                const std::string WAITING = "Waiting for timetable";
+                auto waiting_cps = sf_utf8_split(WAITING);
+                int text_start_col =
+                    (SF_NUM_COLS - (int)waiting_cps.size()) / 2;
+                int text_row = SF_NUM_ROWS / 2;
 
-                    const std::string WAITING = "Waiting for timetable";
-                    auto waiting_cps = sf_utf8_split(WAITING);
-                    int text_start_col =
-                        (SF_NUM_COLS - (int)waiting_cps.size()) / 2;
-                    int text_row = SF_NUM_ROWS / 2;
+                new_target.resize(SF_NUM_CELLS);
+                for (int i = 0; i < SF_NUM_CELLS; ++i) {
+                    int col = i % SF_NUM_COLS;
+                    int row = i / SF_NUM_COLS;
 
-                    new_target.resize(SF_NUM_CELLS);
+                    bool is_frame = (row == 0 || row == SF_NUM_ROWS - 1 ||
+                                     col == 0 || col == SF_NUM_COLS - 1);
+                    bool is_text =
+                        (row == text_row && col >= text_start_col &&
+                         col < text_start_col + (int)waiting_cps.size());
 
-                    for (int i = 0; i < SF_NUM_CELLS; ++i) {
-                        int col = i % SF_NUM_COLS;
-                        int row = i / SF_NUM_COLS;
+                    if (is_text && !is_frame) {
+                        int text_col = col - text_start_col;
+                        new_target[i] = {waiting_cps[text_col],
+                                         current_config->colors.fg_default};
+                    } else if (is_frame) {
+                        int perimeter_pos =
+                            (col == 0)                 ? row
+                            : (row == SF_NUM_ROWS - 1) ? (SF_NUM_ROWS - 1 + col)
+                            : (col == SF_NUM_COLS - 1)
+                                ? (SF_NUM_ROWS - 1 + SF_NUM_COLS - 1 +
+                                   (SF_NUM_ROWS - 1 - row))
+                                : (2 * (SF_NUM_ROWS - 1) + SF_NUM_COLS - 1 +
+                                   (SF_NUM_COLS - 1 - col));
 
-                        bool is_frame = (row == 0 || row == SF_NUM_ROWS - 1 ||
-                                         col == 0 || col == SF_NUM_COLS - 1);
-                        bool is_text =
-                            (row == text_row && col >= text_start_col &&
-                             col < text_start_col + (int)waiting_cps.size());
-
-                        if (is_text && !is_frame) {
-                            int text_col = col - text_start_col;
-                            new_target[i] = {waiting_cps[text_col],
-                                             current_config->colors.fg_default};
-                        } else if (is_frame) {
-                            // Each frame cell starts one charset step apart
-                            // from its neighbor Use the cell's linear position
-                            // around the frame perimeter as offset
-                            int perimeter_pos =
-                                (col == 0) ? row
-                                : (row == SF_NUM_ROWS - 1)
-                                    ? (SF_NUM_ROWS - 1 + col)
-                                : (col == SF_NUM_COLS - 1)
-                                    ? (SF_NUM_ROWS - 1 + SF_NUM_COLS - 1 +
-                                       (SF_NUM_ROWS - 1 - row))
-                                    : (2 * (SF_NUM_ROWS - 1) + SF_NUM_COLS - 1 +
-                                       (SF_NUM_COLS - 1 - col));
-                            int idx = (a_idx + perimeter_pos + frame_t) %
-                                      charset_size;
+                        if (perimeter_pos < revealed) {
+                            int idx = (perimeter_pos + frame_t) % charset_size;
                             new_target[i] = {charset[idx].glyph,
                                              current_config->colors.fg_default};
                         } else {
                             new_target[i] = {" ", {0, 0, 0}};
                         }
+                    } else {
+                        new_target[i] = {" ", {0, 0, 0}};
                     }
                 }
             } else {
@@ -562,6 +566,7 @@ int main(int argc, char *argv[]) {
         }
 
         offscreen->Fill(bg_color.r, bg_color.g, bg_color.b);
+        auto charset = sf_charset(current_config->colors.fg_default);
         sf_update_cells(cells, previous_target, new_target, charset);
         sf_render_cells(cells, step, charset);
 
