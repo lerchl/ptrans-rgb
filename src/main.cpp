@@ -189,8 +189,8 @@ int main(int argc, char *argv[]) {
 
     auto run_http_server =
         make_http_server(APP_VERSION, configuration, text, request_render);
-    auto run_timetable_job = make_timetable_job(
-        app_cv, app_mutex, app_running, timetable, request_render);
+    auto run_timetable_job = make_timetable_job(app_cv, app_mutex, app_running,
+                                                timetable, request_render);
     http_server_thread = std::thread(
         [&run_http_server, port]() { run_http_server(http_server, port); });
     timetable_job_thread = std::thread(
@@ -358,19 +358,52 @@ int main(int argc, char *argv[]) {
         return result;
     };
 
+    bool lastFrameInBlackoutWindow = false;
+
     for (;;) {
-        auto frame_start = std::chrono::steady_clock::now();
+        {
+            std::unique_lock lock(render_mutex);
+            bool any_flipping =
+                std::any_of(cells.begin(), cells.end(),
+                            [](const SFCell &c) { return c.flipping; });
+            if (any_flipping) {
+                render_cv.wait_for(lock,
+                                   std::chrono::milliseconds(SF_MS_PER_STEP));
+            } else {
+                render_cv.wait_for(lock, std::chrono::seconds(30),
+                                   [] { return needs_render.load(); });
+            }
+            needs_render = false;
+        }
+
         auto current_config = configuration.load(std::memory_order_acquire);
 
-        matrix->SetBrightness(current_config->brightness);
-        offscreen->Fill(bg_color.r, bg_color.g, bg_color.b);
+        if (matrix->brightness() != current_config->brightness) {
+            matrix->SetBrightness(current_config->brightness);
+        }
 
         if (current_config->blackout_window.isDuringBlackout(nowTime())) {
+            if (!lastFrameInBlackoutWindow) {
+                std::cout << std::format("{0:%F_%T} - Entered blackout window.",
+                                         std::chrono::system_clock::now())
+                          << std::endl;
+                lastFrameInBlackoutWindow = true;
+            }
+
+            offscreen->Fill(bg_color.r, bg_color.g, bg_color.b);
             offscreen = matrix->SwapOnVSync(offscreen);
             std::this_thread::sleep_for(std::chrono::seconds(1));
             continue;
         }
 
+        if (lastFrameInBlackoutWindow) {
+            std::cout << std::format("{0:%F_%T} - Exited blackout window.",
+                                     std::chrono::system_clock::now())
+                      << std::endl;
+            lastFrameInBlackoutWindow = false;
+        }
+
+        auto frame_start = std::chrono::steady_clock::now();
         bool step = std::chrono::duration_cast<std::chrono::milliseconds>(
                         frame_start - sf_last_step)
                         .count() >= SF_MS_PER_STEP;
@@ -384,9 +417,9 @@ int main(int argc, char *argv[]) {
         if (current_config->mode == TEXT) {
             auto t = text.load(std::memory_order_acquire);
             if (!t) {
-                new_target = sf_pad_line("No text set!",
+                new_target = sf_pad_line("No text set! Go to",
                                          current_config->colors.fg_default) +
-                             sf_pad_line("Go to https://ptrans.home.l3rchl.at",
+                             sf_pad_line("ptrans.home.l3rchl.at",
                                          current_config->colors.fg_default);
             } else {
                 auto cps = sf_utf8_split(*t);
@@ -399,7 +432,8 @@ int main(int argc, char *argv[]) {
         } else if (current_config->mode == PTRANS) {
             auto tt = timetable.load(std::memory_order_acquire);
             if (!tt) {
-                new_target = sf_pad_line("No timetable available",
+                // TODO: funny spinner
+                new_target = sf_pad_line("Waiting for timetable...",
                                          current_config->colors.fg_default);
             } else {
                 auto departure_color = [&](bool real_time, bool late,
@@ -495,23 +529,18 @@ int main(int argc, char *argv[]) {
                 }
             }
         } else {
-            new_target =
-                sf_pad_line("No mode set!", current_config->colors.fg_default) +
-                sf_pad_line("Go to https://ptrans.home.l3rchl.at",
-                            current_config->colors.fg_default);
+            new_target = sf_pad_line("No mode set! Go to",
+                                     current_config->colors.fg_default) +
+                         sf_pad_line("ptrans.home.l3rchl.at",
+                                     current_config->colors.fg_default);
         }
 
         auto charset = sf_charset(current_config->colors.fg_default);
+
+        offscreen->Fill(bg_color.r, bg_color.g, bg_color.b);
         sf_update_cells(cells, previous_target, new_target, charset);
         sf_render_cells(cells, step, charset);
 
         offscreen = matrix->SwapOnVSync(offscreen);
-
-        // Sleep for whatever remains of the step budget to avoid spinning
-        auto elapsed = std::chrono::steady_clock::now() - frame_start;
-        auto remaining = std::chrono::milliseconds(SF_MS_PER_STEP) - elapsed;
-        if (remaining > std::chrono::milliseconds(0)) {
-            std::this_thread::sleep_for(remaining);
-        }
     }
 }
