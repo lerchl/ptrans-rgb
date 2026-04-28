@@ -44,7 +44,7 @@ make_timetable_job(std::condition_variable &app_cv, std::mutex &app_mutex,
                    std::atomic<std::shared_ptr<TimetableDto>> &timetable,
                    const std::function<void()> &request_render) {
     return [&app_cv, &app_mutex, &app_running, &timetable,
-            &request_render](std::string data_url) {
+            request_render](std::string data_url) {
         httplib::Client cli(data_url);
 
         while (app_running) {

@@ -16,7 +16,7 @@ make_http_server(const char *app_version,
                  std::atomic<std::shared_ptr<const std::string>> &text,
                  const std::function<void()> &request_render) {
     return [app_version, &configuration, &text,
-            &request_render](httplib::Server &server, const int port) {
+            request_render](httplib::Server &server, const int port) {
         server.set_default_headers({
             {"Access-Control-Allow-Origin", "*"},
             {"Access-Control-Allow-Methods",
