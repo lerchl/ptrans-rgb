@@ -219,7 +219,7 @@ int main(int argc, char *argv[]) {
 
     // charset is built with the current fg_default so normal glyphs carry that
     // color. Block chars always keep their fixed colors.
-    auto sf_charset = [&](const Color &fg_default, bool block_chars = true) {
+    auto sf_charset = [&](const Color &fg_default, bool block_chars) {
         std::vector<SFChar> cs;
 
         if (block_chars) {
@@ -566,7 +566,7 @@ int main(int argc, char *argv[]) {
         }
 
         offscreen->Fill(bg_color.r, bg_color.g, bg_color.b);
-        auto charset = sf_charset(current_config->colors.fg_default);
+        auto charset = sf_charset(current_config->colors.fg_default, true);
         sf_update_cells(cells, previous_target, new_target, charset);
         sf_render_cells(cells, step, charset);
 
