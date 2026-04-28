@@ -178,10 +178,9 @@ int main(int argc, char *argv[]) {
     std::atomic<std::shared_ptr<TimetableDto>> timetable;
     std::atomic<std::shared_ptr<const std::string>> text;
 
-    auto run_http_server =
-        make_http_server(APP_VERSION, configuration, text);
-    auto run_timetable_job = make_timetable_job(app_cv, app_mutex, app_running,
-                                                timetable);
+    auto run_http_server = make_http_server(APP_VERSION, configuration, text);
+    auto run_timetable_job =
+        make_timetable_job(app_cv, app_mutex, app_running, timetable);
     http_server_thread = std::thread(
         [&run_http_server, port]() { run_http_server(http_server, port); });
     timetable_job_thread = std::thread(
@@ -388,6 +387,7 @@ int main(int argc, char *argv[]) {
             sf_last_step = frame_start;
         }
 
+        auto charset = sf_charset(current_config->colors.fg_default);
         std::vector<SFChar> new_target;
 
         if (current_config->mode == TEXT) {
@@ -408,9 +408,42 @@ int main(int argc, char *argv[]) {
         } else if (current_config->mode == PTRANS) {
             auto tt = timetable.load(std::memory_order_acquire);
             if (!tt) {
-                // TODO: funny spinner
-                new_target = sf_pad_line("Waiting for timetable...",
-                                         current_config->colors.fg_default);
+                static int wave_t = 0;
+                wave_t++;
+
+                const int wave_width = 5;
+                const int charset_size = (int)charset.size();
+
+                new_target.resize(SF_NUM_CELLS);
+                for (int i = 0; i < SF_NUM_CELLS; ++i) {
+                    int col = i % SF_NUM_COLS;
+                    int peak = (wave_t * 2) % SF_NUM_COLS;
+                    int dist = std::abs(col - peak);
+
+                    int char_idx = (wave_t + col * 3) % charset_size;
+                    const SFChar &sc = charset[char_idx];
+
+                    Color color;
+                    if (dist == 0) {
+                        color = current_config->colors.fg_default;
+                    } else if (dist < wave_width) {
+                        float fade = 1.0f - (float)dist / wave_width;
+                        color = {(uint8_t)(current_config->colors.fg_default.r *
+                                           fade * 0.6f),
+                                 (uint8_t)(current_config->colors.fg_default.g *
+                                           fade * 0.6f),
+                                 (uint8_t)(current_config->colors.fg_default.b *
+                                           fade * 0.6f)};
+                    } else {
+                        color = {
+                            (uint8_t)(current_config->colors.fg_default.r / 10),
+                            (uint8_t)(current_config->colors.fg_default.g / 10),
+                            (uint8_t)(current_config->colors.fg_default.b /
+                                      10)};
+                    }
+
+                    new_target[i] = {sc.glyph, color};
+                }
             } else {
                 auto departure_color = [&](bool real_time, bool late,
                                            bool traffic_jam) -> Color {
@@ -510,8 +543,6 @@ int main(int argc, char *argv[]) {
                          sf_pad_line("ptrans.home.l3rchl.at",
                                      current_config->colors.fg_default);
         }
-
-        auto charset = sf_charset(current_config->colors.fg_default);
 
         offscreen->Fill(bg_color.r, bg_color.g, bg_color.b);
         sf_update_cells(cells, previous_target, new_target, charset);
