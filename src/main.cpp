@@ -408,41 +408,58 @@ int main(int argc, char *argv[]) {
         } else if (current_config->mode == PTRANS) {
             auto tt = timetable.load(std::memory_order_acquire);
             if (!tt) {
-                static int wave_t = 0;
-                wave_t++;
+                if (!tt) {
+                    const int charset_size = (int)charset.size();
 
-                const int wave_width = 5;
-                const int charset_size = (int)charset.size();
+                    // Find the charset index of 'A' as the frame start
+                    int a_idx = sf_charset_index(charset, "A");
 
-                new_target.resize(SF_NUM_CELLS);
-                for (int i = 0; i < SF_NUM_CELLS; ++i) {
-                    int col = i % SF_NUM_COLS;
-                    int peak = (wave_t * 2) % SF_NUM_COLS;
-                    int dist = std::abs(col - peak);
+                    static int frame_t = 0;
+                    frame_t++;
 
-                    int char_idx = (wave_t + col * 3) % charset_size;
-                    const SFChar &sc = charset[char_idx];
+                    const std::string WAITING = "Waiting for timetable";
+                    auto waiting_cps = sf_utf8_split(WAITING);
+                    int text_start_col =
+                        (SF_NUM_COLS - (int)waiting_cps.size()) / 2;
+                    int text_row = SF_NUM_ROWS / 2;
 
-                    Color color;
-                    if (dist == 0) {
-                        color = current_config->colors.fg_default;
-                    } else if (dist < wave_width) {
-                        float fade = 1.0f - (float)dist / wave_width;
-                        color = {(uint8_t)(current_config->colors.fg_default.r *
-                                           fade * 0.6f),
-                                 (uint8_t)(current_config->colors.fg_default.g *
-                                           fade * 0.6f),
-                                 (uint8_t)(current_config->colors.fg_default.b *
-                                           fade * 0.6f)};
-                    } else {
-                        color = {
-                            (uint8_t)(current_config->colors.fg_default.r / 10),
-                            (uint8_t)(current_config->colors.fg_default.g / 10),
-                            (uint8_t)(current_config->colors.fg_default.b /
-                                      10)};
+                    new_target.resize(SF_NUM_CELLS);
+
+                    for (int i = 0; i < SF_NUM_CELLS; ++i) {
+                        int col = i % SF_NUM_COLS;
+                        int row = i / SF_NUM_COLS;
+
+                        bool is_frame = (row == 0 || row == SF_NUM_ROWS - 1 ||
+                                         col == 0 || col == SF_NUM_COLS - 1);
+                        bool is_text =
+                            (row == text_row && col >= text_start_col &&
+                             col < text_start_col + (int)waiting_cps.size());
+
+                        if (is_text && !is_frame) {
+                            int text_col = col - text_start_col;
+                            new_target[i] = {waiting_cps[text_col],
+                                             current_config->colors.fg_default};
+                        } else if (is_frame) {
+                            // Each frame cell starts one charset step apart
+                            // from its neighbor Use the cell's linear position
+                            // around the frame perimeter as offset
+                            int perimeter_pos =
+                                (col == 0) ? row
+                                : (row == SF_NUM_ROWS - 1)
+                                    ? (SF_NUM_ROWS - 1 + col)
+                                : (col == SF_NUM_COLS - 1)
+                                    ? (SF_NUM_ROWS - 1 + SF_NUM_COLS - 1 +
+                                       (SF_NUM_ROWS - 1 - row))
+                                    : (2 * (SF_NUM_ROWS - 1) + SF_NUM_COLS - 1 +
+                                       (SF_NUM_COLS - 1 - col));
+                            int idx = (a_idx + perimeter_pos + frame_t) %
+                                      charset_size;
+                            new_target[i] = {charset[idx].glyph,
+                                             current_config->colors.fg_default};
+                        } else {
+                            new_target[i] = {" ", {0, 0, 0}};
+                        }
                     }
-
-                    new_target[i] = {sc.glyph, color};
                 }
             } else {
                 auto departure_color = [&](bool real_time, bool late,
