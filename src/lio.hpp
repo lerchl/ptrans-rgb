@@ -43,5 +43,4 @@ std::function<void(std::string)>
 make_timetable_job(std::condition_variable &app_cv,
                    std::mutex &app_mutex,
                    const std::atomic<bool> &app_running,
-                   std::atomic<std::shared_ptr<TimetableDto>> &timetable,
-                   const std::function<void()> &request_render);
+                   std::atomic<std::shared_ptr<TimetableDto>> &timetable);
