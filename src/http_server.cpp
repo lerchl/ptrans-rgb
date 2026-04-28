@@ -13,12 +13,14 @@ inline void to_json(json &j, const TextDto &t) { j = json{{"text", t.text}}; }
 std::function<void(httplib::Server &, const int)>
 make_http_server(const char *app_version,
                  std::atomic<std::shared_ptr<Configuration>> &configuration,
-                 std::atomic<std::shared_ptr<const std::string>> &text) {
-    return [app_version, &configuration, &text](httplib::Server &server,
-                                                const int port) {
+                 std::atomic<std::shared_ptr<const std::string>> &text,
+                 const std::function<void()> &request_render) {
+    return [app_version, &configuration, &text,
+            &request_render](httplib::Server &server, const int port) {
         server.set_default_headers({
             {"Access-Control-Allow-Origin", "*"},
-            {"Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS"},
+            {"Access-Control-Allow-Methods",
+             "GET, POST, PUT, PATCH, DELETE, OPTIONS"},
             {"Access-Control-Allow-Headers", "Content-Type"},
         });
 
@@ -40,7 +42,7 @@ make_http_server(const char *app_version,
             res.set_content(j.dump(), "application/json");
         });
 
-        server.Patch("/configuration", [&configuration](
+        server.Patch("/configuration", [&configuration, &request_render](
                                            const httplib::Request &req,
                                            httplib::Response &res) {
             try {
@@ -71,6 +73,7 @@ make_http_server(const char *app_version,
                 }
 
                 configuration.store(config, std::memory_order_release);
+                request_render();
                 res.status = 204;
             } catch (const json::parse_error &e) {
                 res.status = 400;
@@ -89,17 +92,19 @@ make_http_server(const char *app_version,
                        }
                    });
 
-        server.Post("/text", [&text](const httplib::Request &req,
-                                     httplib::Response &res) {
-            try {
-                auto new_text = std::make_shared<std::string>(
-                    json::parse(req.body).get<TextDto>().text);
-                text.store(new_text, std::memory_order_release);
-                res.status = 204;
-            } catch (const json::parse_error &e) {
-                res.status = 400;
-            }
-        });
+        server.Post("/text",
+                    [&text, &request_render](const httplib::Request &req,
+                                             httplib::Response &res) {
+                        try {
+                            auto new_text = std::make_shared<std::string>(
+                                json::parse(req.body).get<TextDto>().text);
+                            text.store(new_text, std::memory_order_release);
+                            request_render();
+                            res.status = 204;
+                        } catch (const json::parse_error &e) {
+                            res.status = 400;
+                        }
+                    });
 
         server.listen("0.0.0.0", port);
     };

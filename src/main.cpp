@@ -33,6 +33,10 @@ std::condition_variable app_cv;
 std::mutex app_mutex;
 std::atomic<bool> app_running{true};
 
+std::condition_variable render_cv;
+std::mutex render_mutex;
+std::atomic<bool> needs_render{false};
+
 rgb_matrix::RGBMatrix *matrix;
 httplib::Server http_server;
 std::thread http_server_thread;
@@ -178,9 +182,15 @@ int main(int argc, char *argv[]) {
     std::atomic<std::shared_ptr<TimetableDto>> timetable;
     std::atomic<std::shared_ptr<const std::string>> text;
 
-    auto run_http_server = make_http_server(APP_VERSION, configuration, text);
-    auto run_timetable_job =
-        make_timetable_job(app_cv, app_mutex, app_running, timetable);
+    auto request_render = [] {
+        needs_render = true;
+        render_cv.notify_one();
+    };
+
+    auto run_http_server =
+        make_http_server(APP_VERSION, configuration, text, request_render);
+    auto run_timetable_job = make_timetable_job(
+        app_cv, app_mutex, app_running, timetable, request_render);
     http_server_thread = std::thread(
         [&run_http_server, port]() { run_http_server(http_server, port); });
     timetable_job_thread = std::thread(

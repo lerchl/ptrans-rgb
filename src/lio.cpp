@@ -40,37 +40,38 @@ ErrorDto parse_error(const std::string &body) {
 
 std::function<void(std::string)>
 make_timetable_job(std::condition_variable &app_cv, std::mutex &app_mutex,
-                   std::atomic<bool> &app_running,
-                   std::atomic<std::shared_ptr<TimetableDto>> &timetable) {
-    return
-        [&app_cv, &app_mutex, &app_running, &timetable](std::string data_url) {
-            httplib::Client cli(data_url);
+                   const std::atomic<bool> &app_running,
+                   std::atomic<std::shared_ptr<TimetableDto>> &timetable,
+                   const std::function<void()> &request_render) {
+    return [&app_cv, &app_mutex, &app_running, &timetable,
+            &request_render](std::string data_url) {
+        httplib::Client cli(data_url);
 
-            while (app_running) {
-                auto result = cli.Get("/timetable");
-                std::string formatted_time =
-                    std::format("{0:%F_%T}", std::chrono::system_clock::now());
+        while (app_running) {
+            auto result = cli.Get("/timetable");
+            std::string formatted_time =
+                std::format("{0:%F_%T}", std::chrono::system_clock::now());
 
-                if (!result) {
-                    std::cerr << std::format("{} - Could not reach ptrans-data",
-                                             formatted_time)
-                              << std::endl;
-                } else if (result->status == 200) {
-                    timetable.store(std::make_shared<TimetableDto>(
-                                        parse_timetable(result->body)),
-                                    std::memory_order_release);
-                } else {
-                    ErrorDto error = parse_error(result->body);
-                    std::cerr
-                        << std::format("{} - {} Could not fetch timetable: {}",
-                                       formatted_time, result->status,
-                                       error.message)
-                        << std::endl;
-                }
-
-                std::unique_lock<std::mutex> lock(app_mutex);
-                app_cv.wait_for(lock, std::chrono::seconds(30),
-                                [&app_running] { return !app_running.load(); });
+            if (!result) {
+                std::cerr << std::format("{} - Could not reach ptrans-data",
+                                         formatted_time)
+                          << std::endl;
+            } else if (result->status == 200) {
+                timetable.store(std::make_shared<TimetableDto>(
+                                    parse_timetable(result->body)),
+                                std::memory_order_release);
+                request_render();
+            } else {
+                ErrorDto error = parse_error(result->body);
+                std::cerr << std::format(
+                                 "{} - {} Could not fetch timetable: {}",
+                                 formatted_time, result->status, error.message)
+                          << std::endl;
             }
-        };
+
+            std::unique_lock<std::mutex> lock(app_mutex);
+            app_cv.wait_for(lock, std::chrono::seconds(30),
+                            [&app_running] { return !app_running.load(); });
+        }
+    };
 }
