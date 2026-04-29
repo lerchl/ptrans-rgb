@@ -392,6 +392,7 @@ int main(int argc, char *argv[]) {
             sf_last_step = frame_start;
         }
 
+        auto charset = sf_charset(current_config->colors.fg_default, true);
         std::vector<SFChar> new_target;
 
         if (current_config->mode == TEXT) {
@@ -412,8 +413,7 @@ int main(int argc, char *argv[]) {
         } else if (current_config->mode == PTRANS) {
             auto tt = timetable.load(std::memory_order_acquire);
             if (!tt) {
-                const auto charset =
-                    sf_charset(current_config->colors.fg_default, false);
+                charset = sf_charset(current_config->colors.fg_default, false);
                 const int charset_size = (int)charset.size();
                 const int perimeter_len = 2 * (SF_NUM_ROWS + SF_NUM_COLS) - 4;
 
@@ -566,7 +566,6 @@ int main(int argc, char *argv[]) {
         }
 
         offscreen->Fill(bg_color.r, bg_color.g, bg_color.b);
-        auto charset = sf_charset(current_config->colors.fg_default, true);
         sf_update_cells(cells, previous_target, new_target, charset);
         sf_render_cells(cells, step, charset);
 
