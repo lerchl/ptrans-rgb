@@ -44,6 +44,9 @@ make_timetable_job(std::condition_variable &app_cv, std::mutex &app_mutex,
                    std::atomic<std::shared_ptr<TimetableDto>> &timetable) {
     return
         [&app_cv, &app_mutex, &app_running, &timetable](std::string data_url) {
+            std::unique_lock<std::mutex> lock(app_mutex);
+            app_cv.wait_for(lock, std::chrono::seconds(10),
+                            [&app_running] { return !app_running.load(); });
             httplib::Client cli(data_url);
 
             while (app_running) {
@@ -68,7 +71,6 @@ make_timetable_job(std::condition_variable &app_cv, std::mutex &app_mutex,
                         << std::endl;
                 }
 
-                std::unique_lock<std::mutex> lock(app_mutex);
                 app_cv.wait_for(lock, std::chrono::seconds(30),
                                 [&app_running] { return !app_running.load(); });
             }
