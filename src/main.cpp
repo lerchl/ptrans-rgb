@@ -219,11 +219,15 @@ int main(int argc, char *argv[]) {
 
     // charset is built with the current fg_default so normal glyphs carry that
     // color. Block chars always keep their fixed colors.
-    auto sf_charset = [&](const Color &fg_default) {
+    auto sf_charset = [&](const Color &fg_default, bool block_chars) {
         std::vector<SFChar> cs;
-        for (auto &b : SF_BLOCK_CHARS) {
-            cs.push_back(b);
+
+        if (block_chars) {
+            for (auto &b : SF_BLOCK_CHARS) {
+                cs.push_back(b);
+            }
         }
+
         for (auto &g : std::vector<std::string>{
                  " ", "A", "Ä", "B", "C", "D", "E",  "F", "G", "H", "I", "J",
                  "K", "L", "M", "N", "O", "Ö", "P",  "Q", "R", "S", "T", "U",
@@ -235,6 +239,7 @@ int main(int argc, char *argv[]) {
                  "%", "&", "=", "+", "_", "'", "\"", "$", "€", "*"}) {
             cs.push_back({g, fg_default});
         }
+
         return cs;
     };
 
@@ -348,19 +353,37 @@ int main(int argc, char *argv[]) {
         return result;
     };
 
+    bool lastFrameInBlackoutWindow = false;
+
     for (;;) {
-        auto frame_start = std::chrono::steady_clock::now();
         auto current_config = configuration.load(std::memory_order_acquire);
 
-        matrix->SetBrightness(current_config->brightness);
-        offscreen->Fill(bg_color.r, bg_color.g, bg_color.b);
+        if (matrix->brightness() != current_config->brightness) {
+            matrix->SetBrightness(current_config->brightness);
+        }
 
         if (current_config->blackout_window.isDuringBlackout(nowTime())) {
+            if (!lastFrameInBlackoutWindow) {
+                std::cout << std::format("{0:%F_%T} - Entered blackout window.",
+                                         std::chrono::system_clock::now())
+                          << std::endl;
+                lastFrameInBlackoutWindow = true;
+            }
+
+            offscreen->Fill(bg_color.r, bg_color.g, bg_color.b);
             offscreen = matrix->SwapOnVSync(offscreen);
             std::this_thread::sleep_for(std::chrono::seconds(1));
             continue;
         }
 
+        if (lastFrameInBlackoutWindow) {
+            std::cout << std::format("{0:%F_%T} - Exited blackout window.",
+                                     std::chrono::system_clock::now())
+                      << std::endl;
+            lastFrameInBlackoutWindow = false;
+        }
+
+        auto frame_start = std::chrono::steady_clock::now();
         bool step = std::chrono::duration_cast<std::chrono::milliseconds>(
                         frame_start - sf_last_step)
                         .count() >= SF_MS_PER_STEP;
@@ -369,14 +392,15 @@ int main(int argc, char *argv[]) {
             sf_last_step = frame_start;
         }
 
+        auto charset = sf_charset(current_config->colors.fg_default, true);
         std::vector<SFChar> new_target;
 
         if (current_config->mode == TEXT) {
             auto t = text.load(std::memory_order_acquire);
             if (!t) {
-                new_target = sf_pad_line("No text set!",
+                new_target = sf_pad_line("No text set! Go to",
                                          current_config->colors.fg_default) +
-                             sf_pad_line("Go to https://ptrans.home.l3rchl.at",
+                             sf_pad_line("ptrans.home.l3rchl.at",
                                          current_config->colors.fg_default);
             } else {
                 auto cps = sf_utf8_split(*t);
@@ -389,8 +413,58 @@ int main(int argc, char *argv[]) {
         } else if (current_config->mode == PTRANS) {
             auto tt = timetable.load(std::memory_order_acquire);
             if (!tt) {
-                new_target = sf_pad_line("No timetable available",
-                                         current_config->colors.fg_default);
+                charset = sf_charset(current_config->colors.fg_default, false);
+                const int charset_size = (int)charset.size();
+                const int perimeter_len = 2 * (SF_NUM_ROWS + SF_NUM_COLS) - 4;
+
+                static int frame_t = 0;
+                static int revealed = 0;
+                frame_t++;
+                if (revealed < perimeter_len)
+                    revealed++;
+
+                const std::string WAITING = "Waiting for timetable";
+                auto waiting_cps = sf_utf8_split(WAITING);
+                int text_start_col =
+                    (SF_NUM_COLS - (int)waiting_cps.size()) / 2;
+                int text_row = SF_NUM_ROWS / 2;
+
+                new_target.resize(SF_NUM_CELLS);
+                for (int i = 0; i < SF_NUM_CELLS; ++i) {
+                    int col = i % SF_NUM_COLS;
+                    int row = i / SF_NUM_COLS;
+
+                    bool is_frame = (row == 0 || row == SF_NUM_ROWS - 1 ||
+                                     col == 0 || col == SF_NUM_COLS - 1);
+                    bool is_text =
+                        (row == text_row && col >= text_start_col &&
+                         col < text_start_col + (int)waiting_cps.size());
+
+                    if (is_text && !is_frame) {
+                        int text_col = col - text_start_col;
+                        new_target[i] = {waiting_cps[text_col],
+                                         current_config->colors.fg_default};
+                    } else if (is_frame) {
+                        int perimeter_pos =
+                            (col == 0)                 ? row
+                            : (row == SF_NUM_ROWS - 1) ? (SF_NUM_ROWS - 1 + col)
+                            : (col == SF_NUM_COLS - 1)
+                                ? (SF_NUM_ROWS - 1 + SF_NUM_COLS - 1 +
+                                   (SF_NUM_ROWS - 1 - row))
+                                : (2 * (SF_NUM_ROWS - 1) + SF_NUM_COLS - 1 +
+                                   (SF_NUM_COLS - 1 - col));
+
+                        if (perimeter_pos < revealed) {
+                            int idx = (perimeter_pos + frame_t) % charset_size;
+                            new_target[i] = {charset[idx].glyph,
+                                             current_config->colors.fg_default};
+                        } else {
+                            new_target[i] = {" ", {0, 0, 0}};
+                        }
+                    } else {
+                        new_target[i] = {" ", {0, 0, 0}};
+                    }
+                }
             } else {
                 auto departure_color = [&](bool real_time, bool late,
                                            bool traffic_jam) -> Color {
@@ -485,23 +559,16 @@ int main(int argc, char *argv[]) {
                 }
             }
         } else {
-            new_target =
-                sf_pad_line("No mode set!", current_config->colors.fg_default) +
-                sf_pad_line("Go to https://ptrans.home.l3rchl.at",
-                            current_config->colors.fg_default);
+            new_target = sf_pad_line("No mode set! Go to",
+                                     current_config->colors.fg_default) +
+                         sf_pad_line("ptrans.home.l3rchl.at",
+                                     current_config->colors.fg_default);
         }
 
-        auto charset = sf_charset(current_config->colors.fg_default);
+        offscreen->Fill(bg_color.r, bg_color.g, bg_color.b);
         sf_update_cells(cells, previous_target, new_target, charset);
         sf_render_cells(cells, step, charset);
 
         offscreen = matrix->SwapOnVSync(offscreen);
-
-        // Sleep for whatever remains of the step budget to avoid spinning
-        auto elapsed = std::chrono::steady_clock::now() - frame_start;
-        auto remaining = std::chrono::milliseconds(SF_MS_PER_STEP) - elapsed;
-        if (remaining > std::chrono::milliseconds(0)) {
-            std::this_thread::sleep_for(remaining);
-        }
     }
 }

@@ -1,4 +1,4 @@
-VERSION=1.0.0
+VERSION=1.1.0
 BUILD := $(VERSION)-$(shell git rev-parse --short HEAD)$(shell git diff --quiet || echo "-dirty")
 RGB_LIB_DISTRIBUTION=external/rpi-rgb-led-matrix
 RGB_INCDIR=$(RGB_LIB_DISTRIBUTION)/include

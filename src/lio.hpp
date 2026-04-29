@@ -40,6 +40,7 @@ void from_json(const json &j, ErrorDto &e);
 ErrorDto parse_error(const std::string &body);
 
 std::function<void(std::string)>
-make_timetable_job(std::condition_variable &app_cv, std::mutex &app_mutex,
-                   std::atomic<bool> &app_running,
+make_timetable_job(std::condition_variable &app_cv,
+                   std::mutex &app_mutex,
+                   const std::atomic<bool> &app_running,
                    std::atomic<std::shared_ptr<TimetableDto>> &timetable);
