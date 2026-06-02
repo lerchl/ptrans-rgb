@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "config.hpp"
+#include "config_manager.hpp"
 #include "http_server.hpp"
 #include "lio.hpp"
 
@@ -76,7 +77,9 @@ static int usage(const char *progname) {
     fprintf(stderr, "Options:\n");
     fprintf(stderr, "\t-p <port>            : Port to listen on.\n");
     fprintf(stderr, "\t-d <data url>        : URL to ptrans-data.\n");
-    fprintf(stderr, "\t-f <font-file>       : BDF font file to use.\n");
+    fprintf(stderr, "\t-f <font-file>       : BDF font file path to use.\n");
+    fprintf(stderr, "\t-s <settings-file>   : Config file path to use (will be "
+                    "created if it does not exist).\n");
     rgb_matrix::PrintMatrixFlags(stderr);
     return 1;
 }
@@ -116,16 +119,15 @@ int main(int argc, char *argv[]) {
         return usage(argv[0]);
     }
 
-    rgb_matrix::Color fg_color_default(100, 0, 255);
-    rgb_matrix::Color fg_color_late(255, 0, 0);
     rgb_matrix::Color bg_color(0, 0, 0);
 
     int port = 0;
     std::string data_url = "";
-    const char *bdf_font_file = NULL;
+    const char *bdf_font_file_path = NULL;
+    const char *config_file_path = NULL;
 
     int opt;
-    while ((opt = getopt(argc, argv, "p:d:f:")) != -1) {
+    while ((opt = getopt(argc, argv, "p:d:f:s:")) != -1) {
         switch (opt) {
         case 'p':
             port = std::stoi(optarg);
@@ -134,23 +136,33 @@ int main(int argc, char *argv[]) {
             data_url = std::string(optarg);
             break;
         case 'f':
-            bdf_font_file = strdup(optarg);
+            bdf_font_file_path = strdup(optarg);
+            break;
+        case 's':
+            config_file_path = strdup(optarg);
             break;
         default:
             return usage(argv[0]);
         }
     }
 
-    if (bdf_font_file == NULL) {
-        fprintf(stderr, "Need to specify a BDF font-file with -f\n");
+    if (bdf_font_file_path == NULL) {
+        fprintf(stderr, "Need to specify a BDF font file path with -f\n");
+        return usage(argv[0]);
+    }
+
+    if (config_file_path == NULL) {
+        fprintf(stderr, "Need to specify a config file path with -s\n");
         return usage(argv[0]);
     }
 
     rgb_matrix::Font font;
-    if (!font.LoadFont(bdf_font_file)) {
-        fprintf(stderr, "Couldn't load font '%s'\n", bdf_font_file);
+    if (!font.LoadFont(bdf_font_file_path)) {
+        fprintf(stderr, "Couldn't load font '%s'\n", bdf_font_file_path);
         return 1;
     }
+
+    auto config_manager = ConfigManager(config_file_path);
 
     matrix =
         rgb_matrix::RGBMatrix::CreateFromOptions(matrix_options, runtime_opt);
@@ -163,22 +175,10 @@ int main(int argc, char *argv[]) {
     signal(SIGTERM, interrupt_handler);
     signal(SIGINT, interrupt_handler);
 
-    std::atomic<std::shared_ptr<Configuration>> configuration =
-        std::make_shared<Configuration>(Configuration{
-            .mode = PTRANS,
-            .brightness = 80,
-            .blackout_window = {.start = {.hour = 0, .minute = 0},
-                                .end = {.hour = 0, .minute = 0},
-                                .override = false},
-            .colors = {.fg_default = {.r = 100, .g = 0, .b = 255},
-                       .fg_late = {.r = 255, .g = 0, .b = 0},
-                       .fg_traffic = {.r = 255, .g = 100, .b = 0},
-                       .fg_punctual = {.r = 0, .g = 255, .b = 0}}});
-
     std::atomic<std::shared_ptr<TimetableDto>> timetable;
     std::atomic<std::shared_ptr<const std::string>> text;
 
-    auto run_http_server = make_http_server(APP_VERSION, configuration, text);
+    auto run_http_server = make_http_server(APP_VERSION, config_manager, text);
     auto run_timetable_job =
         make_timetable_job(app_cv, app_mutex, app_running, timetable);
     http_server_thread = std::thread(
@@ -356,7 +356,7 @@ int main(int argc, char *argv[]) {
     bool lastFrameInBlackoutWindow = false;
 
     for (;;) {
-        auto current_config = configuration.load(std::memory_order_acquire);
+        auto current_config = config_manager.get();
 
         if (matrix->brightness() != current_config->brightness) {
             matrix->SetBrightness(current_config->brightness);

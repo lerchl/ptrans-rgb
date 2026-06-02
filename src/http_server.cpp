@@ -1,4 +1,5 @@
 #include "http_server.hpp"
+#include "config_manager.hpp"
 
 struct TextDto {
     std::string text;
@@ -11,11 +12,10 @@ inline void from_json(const json &j, TextDto &t) {
 inline void to_json(json &j, const TextDto &t) { j = json{{"text", t.text}}; }
 
 std::function<void(httplib::Server &, const int)>
-make_http_server(const char *app_version,
-                 std::atomic<std::shared_ptr<Configuration>> &configuration,
+make_http_server(const char *app_version, ConfigManager &config_manager,
                  std::atomic<std::shared_ptr<const std::string>> &text) {
-    return [app_version, &configuration, &text](httplib::Server &server,
-                                                const int port) {
+    return [app_version, &config_manager, &text](httplib::Server &server,
+                                                 const int port) {
         server.set_default_headers({
             {"Access-Control-Allow-Origin", "*"},
             {"Access-Control-Allow-Methods",
@@ -33,45 +33,25 @@ make_http_server(const char *app_version,
             res.set_content(j.dump(), "application/json");
         });
 
-        server.Get("/configuration", [&configuration](const httplib::Request &,
-                                                      httplib::Response &res) {
-            auto config = configuration.load(std::memory_order_acquire);
+        server.Get("/configuration", [&config_manager](const httplib::Request &,
+                                                       httplib::Response &res) {
+            auto config = config_manager.get();
             json j = *config;
             res.status = 200;
             res.set_content(j.dump(), "application/json");
         });
 
-        server.Patch("/configuration", [&configuration](
+        server.Patch("/configuration", [&config_manager](
                                            const httplib::Request &req,
                                            httplib::Response &res) {
             try {
                 auto patch = json::parse(req.body).get<PatchConfigurationDto>();
-                auto config = configuration.load(std::memory_order_acquire);
 
-                if (patch.brightness) {
-                    if (*patch.brightness < 0 || *patch.brightness > 100) {
-                        res.status = 400;
-                        return;
-                    }
-                    config->brightness = *patch.brightness;
+                if (!config_manager.patch(patch)) {
+                    res.status = 400;
+                    return;
                 }
 
-                if (patch.mode) {
-                    // TODO: Validation
-                    config->mode = *patch.mode;
-                }
-
-                if (patch.blackout_window) {
-                    // TODO: Validation
-                    config->blackout_window = *patch.blackout_window;
-                }
-
-                if (patch.colors) {
-                    // TODO: Validation
-                    config->colors = *patch.colors;
-                }
-
-                configuration.store(config, std::memory_order_release);
                 res.status = 204;
             } catch (const json::parse_error &e) {
                 res.status = 400;

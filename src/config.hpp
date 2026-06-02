@@ -51,6 +51,8 @@ struct Configuration {
     BlackoutWindow blackout_window;
     Colors colors;
 };
+void from_json(const json&j, Configuration &c);
+void to_json(json &j, const Configuration &c);
 
 struct PatchConfigurationDto {
     std::optional<int> brightness;
@@ -59,4 +61,3 @@ struct PatchConfigurationDto {
     std::optional<Colors> colors;
 };
 void from_json(const json &j, PatchConfigurationDto &p);
-void to_json(json &j, const Configuration &c);
