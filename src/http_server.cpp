@@ -55,6 +55,11 @@ make_http_server(const char *app_version, ConfigManager &config_manager,
                 res.status = 204;
             } catch (const json::parse_error &e) {
                 res.status = 400;
+            } catch (const std::exception &e) {
+                std::cerr << "PATCH /configuration failed: " << e.what()
+                          << std::endl;
+
+                res.status = 500;
             }
         });
 
