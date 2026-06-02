@@ -81,9 +81,22 @@ void ConfigManager::save(const Configuration &c) const {
 
     {
         std::ofstream f(tmp);
+        if (!f.is_open()) {
+            throw std::runtime_error("Cannot open " + tmp);
+        }
+
         f << j.dump(4);
         f.flush();
+
+        if (!f) {
+            throw std::runtime_error("Failed writing config file");
+        }
     }
 
-    std::filesystem::rename(tmp, path_);
+    std::error_code ec;
+    std::filesystem::rename(tmp, path_, ec);
+
+    if (ec) {
+        throw std::runtime_error("Rename failed: " + ec.message());
+    }
 }
