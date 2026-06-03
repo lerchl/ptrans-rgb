@@ -598,38 +598,33 @@ int main(int argc, char *argv[]) {
                     }
                 }
 
-                const std::string test_text =
-                    "This is a very long text, that cannot be "
-                    "shown on just one line, I need this to be "
-                    "split into multiple messages!";
+                if (tt->message.has_value()) {
+                    std::string footer_line = tt->message.value();
+                    if (footer_line.length() >
+                        static_cast<size_t>(SF_NUM_COLS)) {
+                        auto pages = build_footer_pages(footer_line);
 
-                std::string footer_line = "";
+                        auto now = std::chrono::steady_clock::now();
+                        auto seconds =
+                            std::chrono::duration_cast<std::chrono::seconds>(
+                                now.time_since_epoch())
+                                .count();
 
-                if (test_text.length() <= static_cast<size_t>(SF_NUM_COLS)) {
-                    footer_line = test_text;
-                } else {
-                    auto pages = build_footer_pages(test_text);
+                        size_t page = (seconds / 10) % pages.size();
 
-                    auto now = std::chrono::steady_clock::now();
-                    auto seconds =
-                        std::chrono::duration_cast<std::chrono::seconds>(
-                            now.time_since_epoch())
-                            .count();
+                        std::string indicator =
+                            std::format("{}/{}", page + 1, pages.size());
 
-                    size_t page = (seconds / 15) % pages.size();
+                        footer_line =
+                            std::format("{:<{}}{:>{}}", pages[page],
+                                        SF_NUM_COLS - (int)indicator.size(),
+                                        indicator, (int)indicator.size());
+                    }
 
-                    std::string indicator =
-                        std::format("{}/{}", page + 1, pages.size());
-
-                    footer_line =
-                        std::format("{:<{}}{:>{}}", pages[page],
-                                    SF_NUM_COLS - (int)indicator.size(),
-                                    indicator, (int)indicator.size());
-                }
-
-                for (auto &cp : sf_utf8_split(footer_line)) {
-                    new_target.push_back(
-                        {cp, current_config->colors.fg_default});
+                    for (auto &cp : sf_utf8_split(footer_line)) {
+                        new_target.push_back(
+                            {cp, current_config->colors.fg_default});
+                    }
                 }
             }
         } else {
