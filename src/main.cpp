@@ -353,6 +353,46 @@ int main(int argc, char *argv[]) {
         return result;
     };
 
+    auto build_footer_pages = [&](const std::string &text) {
+        std::vector<std::string> pages;
+
+        std::istringstream iss(text);
+        std::string word;
+        std::vector<std::string> words;
+
+        while (iss >> word) {
+            words.push_back(word);
+        }
+
+        // Worst case: " 99/99"
+        constexpr int PAGE_INDICATOR_WIDTH = 6;
+        const int TEXT_WIDTH = SF_NUM_COLS - PAGE_INDICATOR_WIDTH;
+
+        std::string current;
+
+        for (const auto &w : words) {
+            int needed = current.empty()
+                             ? (int)sf_utf8_split(w).size()
+                             : (int)sf_utf8_split(current + " " + w).size();
+
+            if (needed > TEXT_WIDTH) {
+                pages.push_back(current);
+                current = w;
+            } else {
+                if (!current.empty()) {
+                    current += ' ';
+                }
+                current += w;
+            }
+        }
+
+        if (!current.empty()) {
+            pages.push_back(current);
+        }
+
+        return pages;
+    };
+
     bool lastFrameInBlackoutWindow = false;
 
     for (;;) {
@@ -558,7 +598,36 @@ int main(int argc, char *argv[]) {
                     }
                 }
 
-                for (auto &cp : sf_utf8_split("test!")) {
+                const std::string test_text =
+                    "This is a very long text, that cannot be "
+                    "shown on just one line, I need this to be "
+                    "split into multiple messages!";
+
+                std::string footer_line = "";
+
+                if (test_text.length() <= static_cast<size_t>(SF_NUM_COLS)) {
+                    footer_line = test_text;
+                } else {
+                    auto pages = build_footer_pages(test_text);
+
+                    auto now = std::chrono::steady_clock::now();
+                    auto seconds =
+                        std::chrono::duration_cast<std::chrono::seconds>(
+                            now.time_since_epoch())
+                            .count();
+
+                    size_t page = (seconds / 15) % pages.size();
+
+                    std::string indicator =
+                        std::format("{}/{}", page + 1, pages.size());
+
+                    footer_line =
+                        std::format("{:<{}}{:>{}}", pages[page],
+                                    SF_NUM_COLS - (int)indicator.size(),
+                                    indicator, (int)indicator.size());
+                }
+
+                for (auto &cp : sf_utf8_split(footer_line)) {
                     new_target.push_back(
                         {cp, current_config->colors.fg_default});
                 }
