@@ -65,6 +65,21 @@ void to_json(json &j, const Colors &c) {
 
 Color::operator rgb_matrix::Color() const { return rgb_matrix::Color(r, g, b); }
 
+void from_json(const json &j, Configuration &c) {
+    c.brightness = j.value("brightness", 100);
+
+    j.at("mode").get_to(c.mode);
+    j.at("blackoutWindow").get_to(c.blackout_window);
+    j.at("colors").get_to(c.colors);
+}
+
+void to_json(json &j, const Configuration &c) {
+    j = json{{"brightness", c.brightness},
+             {"mode", c.mode},
+             {"blackoutWindow", c.blackout_window},
+             {"colors", c.colors}};
+}
+
 void from_json(const json &j, PatchConfigurationDto &p) {
     if (j.contains("brightness")) {
         p.brightness = j.at("brightness").get<int>();
@@ -81,11 +96,4 @@ void from_json(const json &j, PatchConfigurationDto &p) {
     if (j.contains("colors")) {
         p.colors = j.at("colors").get<Colors>();
     }
-}
-
-void to_json(json &j, const Configuration &c) {
-    j = json{{"brightness", c.brightness},
-             {"mode", c.mode},
-             {"blackoutWindow", c.blackout_window},
-             {"colors", c.colors}};
 }
