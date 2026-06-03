@@ -513,7 +513,7 @@ int main(int argc, char *argv[]) {
                 }
 
                 new_target.clear();
-                for (int row = 0; row < SF_NUM_ROWS; ++row) {
+                for (int row = 0; row < SF_NUM_ROWS - 1; ++row) {
                     if (row >= (int)display_lines.size()) {
                         auto padding =
                             sf_pad_line("", current_config->colors.fg_default);
@@ -556,6 +556,11 @@ int main(int argc, char *argv[]) {
                     for (auto &c : dep_cells) {
                         new_target.push_back(c);
                     }
+                }
+
+                for (auto &cp : sf_utf8_split("test!")) {
+                    new_target.push_back(
+                        {cp, current_config->colors.fg_default});
                 }
             }
         } else {
