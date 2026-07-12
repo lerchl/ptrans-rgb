@@ -312,7 +312,7 @@ int main(int argc, char *argv[]) {
     // --- Derived layout constants ---
     // Matrix dimensions come from the matrix itself, so --led-chain etc.
     // are respected
-    const int SF_MATRIX_W = matrix->width();
+    const int SF_MATRIX_W = matrix->width() - 64;
     const int SF_MATRIX_H = matrix->height();
     const int SF_MS_PER_STEP = 25;
 
@@ -440,7 +440,7 @@ int main(int argc, char *argv[]) {
                                const std::vector<SFChar> &charset,
                                bool skip_first_display) {
         int charset_size = (int)charset.size();
-        for (int i = skip_first_display ? 9 : 0; i < SF_NUM_CELLS; ++i) {
+        for (int i = 0; i < SF_NUM_CELLS; ++i) {
             SFCell &cell = cells[i];
             int row = i / SF_NUM_COLS;
             int col = i % SF_NUM_COLS;
@@ -766,12 +766,9 @@ int main(int argc, char *argv[]) {
 
         offscreen->Fill(bg_color.r, bg_color.g, bg_color.b);
 
-        std::cout << "Before iamge" << std::endl;
-
         static Image img;
         if (img.width == 0 && current_currently_playing &&
             current_currently_playing->album_cover_url.has_value()) {
-            std::cout << "In iamge if" << std::endl;
             std::string raw_bytes;
             if (!download_to_memory(
                     current_currently_playing->album_cover_url.value(),
@@ -790,15 +787,12 @@ int main(int argc, char *argv[]) {
             std::cout << "Decoded image: " << img.width << "x" << img.height
                       << "\n";
         }
-        std::cout << "Drawing" << std::endl;
-        if (img.width > 0) {
-            draw_resized_square(img, 64, 0, 0, offscreen);
-        }
-        std::cout << "After draw" << std::endl;
 
-        std::cout << "Update cells" << std::endl;
+        if (img.width > 0) {
+            draw_resized_square(img, 64, 128, 0, offscreen);
+        }
+
         sf_update_cells(cells, previous_target, new_target, charset);
-        std::cout << "Render cells" << std::endl;
         sf_render_cells(cells, step, charset,
                         current_currently_playing ? true : false);
 
