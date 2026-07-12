@@ -791,7 +791,9 @@ int main(int argc, char *argv[]) {
                       << "\n";
         }
         std::cout << "Drawing" << std::endl;
-        draw_resized_square(img, 64, 0, 0, offscreen);
+        if (img.width > 0) {
+            draw_resized_square(img, 64, 0, 0, offscreen);
+        }
         std::cout << "After draw" << std::endl;
 
         std::cout << "Update cells" << std::endl;
