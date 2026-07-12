@@ -30,14 +30,7 @@ struct TimetableDto {
 };
 
 void from_json(const json &j, TimetableDto &tt);
-TimetableDto parse_tiretable(const std::string &body);
-
-struct ErrorDto {
-    std::string message;
-};
-
-void from_json(const json &j, ErrorDto &e);
-ErrorDto parse_error(const std::string &body);
+TimetableDto parse_timetable(const std::string &body);
 
 std::function<void(std::string)>
 make_timetable_job(std::condition_variable &app_cv,

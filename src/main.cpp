@@ -2,6 +2,9 @@
 #include "http_server.hpp"
 #include "led-matrix.h"
 
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
 #include <atomic>
 #include <chrono>
 #include <cstddef>
@@ -23,6 +26,7 @@
 #include "config_manager.hpp"
 #include "http_server.hpp"
 #include "lio.hpp"
+#include "spotify.hpp"
 
 #ifndef APP_VERSION
 #define APP_VERSION "unknown"
@@ -38,6 +42,7 @@ rgb_matrix::RGBMatrix *matrix;
 httplib::Server http_server;
 std::thread http_server_thread;
 std::thread timetable_job_thread;
+std::thread spotify_job_thread;
 
 struct SFChar {
     std::string glyph;
@@ -65,11 +70,124 @@ static void interrupt_handler(int) {
     http_server.stop();
     http_server_thread.join();
     timetable_job_thread.join();
+    spotify_job_thread.join();
 
     delete matrix;
 
     std::cout << std::endl;
     exit(0);
+}
+
+// Splits a URL into "scheme://host[:port]" and "/path" for httplib::Client.
+// Very small and deliberately not a general-purpose URL parser.
+bool split_url(const std::string &url, std::string *origin, std::string *path) {
+    const auto scheme_end = url.find("://");
+    if (scheme_end == std::string::npos)
+        return false;
+
+    const auto path_start = url.find('/', scheme_end + 3);
+    if (path_start == std::string::npos) {
+        *origin = url;
+        *path = "/";
+    } else {
+        *origin = url.substr(0, path_start);
+        *path = url.substr(path_start);
+    }
+    return true;
+}
+
+// Downloads raw bytes from a URL into memory using httplib. Returns true on
+// success.
+bool download_to_memory(const std::string &url, std::string *out) {
+    std::string origin, path;
+    if (!split_url(url, &origin, &path)) {
+        std::cerr << "Could not parse URL: " << url << "\n";
+        return false;
+    }
+
+    httplib::Client client(origin);
+    client.set_follow_location(true);
+    client.set_connection_timeout(10);
+    client.set_read_timeout(15);
+
+    auto res = client.Get(path);
+    if (!res) {
+        std::cerr << "HTTP request failed: " << httplib::to_string(res.error())
+                  << "\n";
+        return false;
+    }
+    if (res->status < 200 || res->status >= 300) {
+        std::cerr << "HTTP error: " << res->status << "\n";
+        return false;
+    }
+
+    *out = std::move(res->body);
+    return true;
+}
+
+// A simple RGB image decoded into a flat pixel buffer.
+struct Image {
+    int width = 0;
+    int height = 0;
+    std::vector<uint8_t> pixels; // RGB, 3 bytes per pixel, row-major
+};
+
+bool decode_image(const std::string &bytes, Image *img) {
+    int w, h, channels;
+    const auto *raw = reinterpret_cast<const uint8_t *>(bytes.data());
+    uint8_t *data = stbi_load_from_memory(raw, static_cast<int>(bytes.size()),
+                                          &w, &h, &channels, 3 /* force RGB */);
+    if (!data) {
+        std::cerr << "stb_image decode failed: " << stbi_failure_reason()
+                  << "\n";
+        return false;
+    }
+    img->width = w;
+    img->height = h;
+    img->pixels.assign(data, data + (static_cast<size_t>(w) * h * 3));
+    stbi_image_free(data);
+    return true;
+}
+
+// Resizes `src` to `dst_size` x `dst_size` using bilinear sampling and
+// draws it into `canvas` at (offset_x, offset_y).
+void draw_resized_square(const Image &src, int dst_size, int offset_x,
+                         int offset_y, rgb_matrix::FrameCanvas *canvas) {
+    const float scale_x = static_cast<float>(src.width) / dst_size;
+    const float scale_y = static_cast<float>(src.height) / dst_size;
+
+    for (int y = 0; y < dst_size; ++y) {
+        for (int x = 0; x < dst_size; ++x) {
+            const float sx = x * scale_x;
+            const float sy = y * scale_y;
+
+            const int x0 = std::min(static_cast<int>(sx), src.width - 2);
+            const int y0 = std::min(static_cast<int>(sy), src.height - 2);
+            const float fx = sx - x0;
+            const float fy = sy - y0;
+
+            auto lerp = [](float a, float b, float t) {
+                return a + (b - a) * t;
+            };
+
+            uint8_t rgb[3];
+            for (int c = 0; c < 3; ++c) {
+                const float p00 = src.pixels[(y0 * src.width + x0) * 3 + c];
+                const float p10 = src.pixels[(y0 * src.width + x0 + 1) * 3 + c];
+                const float p01 =
+                    src.pixels[((y0 + 1) * src.width + x0) * 3 + c];
+                const float p11 =
+                    src.pixels[((y0 + 1) * src.width + x0 + 1) * 3 + c];
+                const float top = lerp(p00, p10, fx);
+                const float bottom = lerp(p01, p11, fx);
+                rgb[c] =
+                    static_cast<uint8_t>(std::round(lerp(top, bottom, fy)));
+            }
+
+            canvas->SetPixel(offset_x + x, offset_y + y, rgb[0], rgb[1],
+                             rgb[2]);
+        }
+    }
 }
 
 static int usage(const char *progname) {
@@ -175,20 +293,26 @@ int main(int argc, char *argv[]) {
     signal(SIGTERM, interrupt_handler);
     signal(SIGINT, interrupt_handler);
 
-    std::atomic<std::shared_ptr<TimetableDto>> timetable;
     std::atomic<std::shared_ptr<const std::string>> text;
+    std::atomic<std::shared_ptr<TimetableDto>> timetable;
+    std::atomic<std::shared_ptr<CurrentlyPlayingDto>> currently_playing;
 
     auto run_http_server = make_http_server(APP_VERSION, config_manager, text);
     auto run_timetable_job =
         make_timetable_job(app_cv, app_mutex, app_running, timetable);
+    auto run_spotify_job =
+        make_spotify_job(app_cv, app_mutex, app_running, currently_playing);
     http_server_thread = std::thread(
         [&run_http_server, port]() { run_http_server(http_server, port); });
     timetable_job_thread = std::thread(
         [&run_timetable_job, data_url]() { run_timetable_job(data_url); });
+    spotify_job_thread = std::thread([&run_spotify_job]() {
+        run_spotify_job("http://localhost:3000/spotify/currentlyPlaying");
+    });
 
     // --- Derived layout constants ---
-    // Matrix dimensions come from the matrix itself, so --led-chain etc. are
-    // respected
+    // Matrix dimensions come from the matrix itself, so --led-chain etc.
+    // are respected
     const int SF_MATRIX_W = matrix->width();
     const int SF_MATRIX_H = matrix->height();
     const int SF_MS_PER_STEP = 25;
@@ -314,9 +438,10 @@ int main(int argc, char *argv[]) {
     // During a flip the cell cycles through charset glyphs. Intermediate glyphs
     // are drawn in fg_default; only the final target glyph gets target_color.
     auto sf_render_cells = [&](std::vector<SFCell> &cells, bool step,
-                               const std::vector<SFChar> &charset) {
+                               const std::vector<SFChar> &charset,
+                               bool skip_first_display) {
         int charset_size = (int)charset.size();
-        for (int i = 0; i < SF_NUM_CELLS; ++i) {
+        for (int i = skip_first_display ? 9 : 0; i < SF_NUM_CELLS; ++i) {
             SFCell &cell = cells[i];
             int row = i / SF_NUM_COLS;
             int col = i % SF_NUM_COLS;
@@ -422,6 +547,9 @@ int main(int argc, char *argv[]) {
                       << std::endl;
             lastFrameInBlackoutWindow = false;
         }
+
+        auto current_currently_playing =
+            currently_playing.load(std::memory_order_acquire);
 
         auto frame_start = std::chrono::steady_clock::now();
         bool step = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -536,7 +664,10 @@ int main(int argc, char *argv[]) {
                     dl.line_name = trip.line;
                     dl.direction = trip.direction;
 
-                    for (auto &&dep : trip.departures | std::views::take(3)) {
+                    for (auto &&dep :
+                         trip.departures |
+                             std::views::take(current_currently_playing ? 1
+                                                                        : 3)) {
                         std::string s = dep.countdown == 0
                                             ? "*"
                                             : std::to_string(dep.countdown);
@@ -635,8 +766,31 @@ int main(int argc, char *argv[]) {
         }
 
         offscreen->Fill(bg_color.r, bg_color.g, bg_color.b);
+
+        static Image img;
+        if (img.width == 0 && current_currently_playing->album_cover_url.has_value()) {
+            std::string raw_bytes;
+            if (!download_to_memory(
+                    current_currently_playing->album_cover_url.value(),
+                    &raw_bytes)) {
+                std::cerr << "Failed to download image from "
+                          << current_currently_playing->album_cover_url.value()
+                          << "\n";
+                return 1;
+            }
+
+            if (!decode_image(raw_bytes, &img)) {
+                std::cerr << "Failed to decode image\n";
+                return 1;
+            }
+            std::cout << "Decoded image: " << img.width << "x" << img.height
+                      << "\n";
+        }
+        draw_resized_square(img, 64, 0, 0, offscreen);
+
         sf_update_cells(cells, previous_target, new_target, charset);
-        sf_render_cells(cells, step, charset);
+        sf_render_cells(cells, step, charset,
+                        current_currently_playing ? true : false);
 
         offscreen = matrix->SwapOnVSync(offscreen);
     }
