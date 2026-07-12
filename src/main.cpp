@@ -306,8 +306,8 @@ int main(int argc, char *argv[]) {
         [&run_http_server, port]() { run_http_server(http_server, port); });
     timetable_job_thread = std::thread(
         [&run_timetable_job, data_url]() { run_timetable_job(data_url); });
-    spotify_job_thread =
-        std::thread([&run_spotify_job, data_url]() { run_spotify_job(data_url); });
+    spotify_job_thread = std::thread(
+        [&run_spotify_job, data_url]() { run_spotify_job(data_url); });
 
     // --- Derived layout constants ---
     // Matrix dimensions come from the matrix itself, so --led-chain etc.
@@ -767,7 +767,7 @@ int main(int argc, char *argv[]) {
         offscreen->Fill(bg_color.r, bg_color.g, bg_color.b);
 
         static Image img;
-        if (img.width == 0 &&
+        if (img.width == 0 && current_currently_playing &&
             current_currently_playing->album_cover_url.has_value()) {
             std::string raw_bytes;
             if (!download_to_memory(
