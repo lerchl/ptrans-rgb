@@ -766,9 +766,12 @@ int main(int argc, char *argv[]) {
 
         offscreen->Fill(bg_color.r, bg_color.g, bg_color.b);
 
+        std::cout << "Before iamge" << std::endl;
+
         static Image img;
         if (img.width == 0 && current_currently_playing &&
             current_currently_playing->album_cover_url.has_value()) {
+            std::cout << "In iamge if" << std::endl;
             std::string raw_bytes;
             if (!download_to_memory(
                     current_currently_playing->album_cover_url.value(),
@@ -778,6 +781,7 @@ int main(int argc, char *argv[]) {
                           << "\n";
                 return 1;
             }
+            std::cout << "Downloaded" << std::endl;
 
             if (!decode_image(raw_bytes, &img)) {
                 std::cerr << "Failed to decode image\n";
@@ -786,9 +790,13 @@ int main(int argc, char *argv[]) {
             std::cout << "Decoded image: " << img.width << "x" << img.height
                       << "\n";
         }
+        std::cout << "Drawing" << std::endl;
         draw_resized_square(img, 64, 0, 0, offscreen);
+        std::cout << "After draw" << std::endl;
 
+        std::cout << "Update cells" << std::endl;
         sf_update_cells(cells, previous_target, new_target, charset);
+        std::cout << "Render cells" << std::endl;
         sf_render_cells(cells, step, charset,
                         current_currently_playing ? true : false);
 
