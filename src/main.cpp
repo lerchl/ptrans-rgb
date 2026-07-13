@@ -518,6 +518,8 @@ int main(int argc, char *argv[]) {
     };
 
     bool lastFrameInBlackoutWindow = false;
+    CurrentlyPlayingDto last_currently_playing;
+    Image current_album_art;
 
     for (;;) {
         auto current_config = config_manager.get();
@@ -766,9 +768,10 @@ int main(int argc, char *argv[]) {
 
         offscreen->Fill(bg_color.r, bg_color.g, bg_color.b);
 
-        static Image img;
-        if (img.width == 0 && current_currently_playing &&
-            current_currently_playing->album_cover_url.has_value()) {
+        if (current_album_art.width == 0 && current_currently_playing &&
+            current_currently_playing->album_cover_url.has_value() &&
+            !last_currently_playing.album_cover_url->contains(
+                current_currently_playing->album_cover_url.value())) {
             std::string raw_bytes;
             if (!download_to_memory(
                     current_currently_playing->album_cover_url.value(),
@@ -780,16 +783,16 @@ int main(int argc, char *argv[]) {
             }
             std::cout << "Downloaded" << std::endl;
 
-            if (!decode_image(raw_bytes, &img)) {
+            if (!decode_image(raw_bytes, &current_album_art)) {
                 std::cerr << "Failed to decode image\n";
                 return 1;
             }
-            std::cout << "Decoded image: " << img.width << "x" << img.height
-                      << "\n";
+            std::cout << "Decoded image: " << current_album_art.width << "x"
+                      << current_album_art.height << "\n";
         }
 
-        if (img.width > 0) {
-            draw_resized_square(img, 64, 128, 0, offscreen);
+        if (current_album_art.width > 0) {
+            draw_resized_square(current_album_art, 64, 128, 0, offscreen);
         }
 
         sf_update_cells(cells, previous_target, new_target, charset);
