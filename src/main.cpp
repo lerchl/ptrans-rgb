@@ -768,7 +768,7 @@ int main(int argc, char *argv[]) {
 
         offscreen->Fill(bg_color.r, bg_color.g, bg_color.b);
 
-        if (current_album_art.width == 0 && current_currently_playing &&
+        if (current_currently_playing &&
             current_currently_playing->album_cover_url.has_value() &&
             (!last_currently_playing.album_cover_url.has_value() ||
              last_currently_playing.album_cover_url.value() !=

@@ -36,13 +36,11 @@ std::function<void(std::string)> make_spotify_job(
                                              formatted_time)
                               << std::endl;
                 } else if (result->status == 200) {
-                    std::cout << result->body << std::endl;
                     currentlyPlaying.store(
                         std::make_shared<CurrentlyPlayingDto>(
                             parse_currently_playing(result->body)),
                         std::memory_order_release);
                 } else if (result->status == 404) {
-                    std::cout << result->body << std::endl;
                     currentlyPlaying.store(nullptr, std::memory_order_release);
                 } else {
                     ErrorDto error = parse_error(result->body);
