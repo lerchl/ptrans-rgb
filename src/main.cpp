@@ -770,8 +770,9 @@ int main(int argc, char *argv[]) {
 
         if (current_album_art.width == 0 && current_currently_playing &&
             current_currently_playing->album_cover_url.has_value() &&
-            !last_currently_playing.album_cover_url->contains(
-                current_currently_playing->album_cover_url.value())) {
+            (!last_currently_playing.album_cover_url.has_value() ||
+             last_currently_playing.album_cover_url.value() !=
+                 current_currently_playing->album_cover_url.value())) {
             std::string raw_bytes;
             if (!download_to_memory(
                     current_currently_playing->album_cover_url.value(),
@@ -798,6 +799,10 @@ int main(int argc, char *argv[]) {
         sf_update_cells(cells, previous_target, new_target, charset);
         sf_render_cells(cells, step, charset,
                         current_currently_playing ? true : false);
+
+        if (current_currently_playing) {
+            last_currently_playing = *current_currently_playing;
+        }
 
         offscreen = matrix->SwapOnVSync(offscreen);
     }
