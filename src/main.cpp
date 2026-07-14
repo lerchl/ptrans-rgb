@@ -2,9 +2,6 @@
 #include "http_server.hpp"
 #include "led-matrix.h"
 
-#define STB_IMAGE_IMPLEMENTATION
-#include "stb_image.h"
-
 #include <atomic>
 #include <chrono>
 #include <cstddef>
@@ -22,10 +19,12 @@
 #include <time.h>
 #include <vector>
 
+#include "album_cover.hpp"
 #include "config.hpp"
 #include "config_manager.hpp"
 #include "http_server.hpp"
 #include "lio.hpp"
+#include "split_flap.hpp"
 #include "spotify.hpp"
 
 #ifndef APP_VERSION
@@ -44,25 +43,6 @@ std::thread http_server_thread;
 std::thread timetable_job_thread;
 std::thread spotify_job_thread;
 
-struct SFChar {
-    std::string glyph;
-    Color color;
-};
-
-bool operator==(const Color &a, const Color &b) {
-    return a.r == b.r && a.g == b.g && a.b == b.b;
-}
-
-bool operator==(const SFChar &a, const SFChar &b) {
-    return a.glyph == b.glyph && a.color == b.color;
-}
-
-std::vector<SFChar> operator+(std::vector<SFChar> a,
-                              const std::vector<SFChar> &b) {
-    a.insert(a.end(), b.begin(), b.end());
-    return a;
-}
-
 static void interrupt_handler(int) {
     app_running = false;
     app_cv.notify_all();
@@ -76,118 +56,6 @@ static void interrupt_handler(int) {
 
     std::cout << std::endl;
     exit(0);
-}
-
-// Splits a URL into "scheme://host[:port]" and "/path" for httplib::Client.
-// Very small and deliberately not a general-purpose URL parser.
-bool split_url(const std::string &url, std::string *origin, std::string *path) {
-    const auto scheme_end = url.find("://");
-    if (scheme_end == std::string::npos)
-        return false;
-
-    const auto path_start = url.find('/', scheme_end + 3);
-    if (path_start == std::string::npos) {
-        *origin = url;
-        *path = "/";
-    } else {
-        *origin = url.substr(0, path_start);
-        *path = url.substr(path_start);
-    }
-    return true;
-}
-
-// Downloads raw bytes from a URL into memory using httplib. Returns true on
-// success.
-bool download_to_memory(const std::string &url, std::string *out) {
-    std::string origin, path;
-    if (!split_url(url, &origin, &path)) {
-        std::cerr << "Could not parse URL: " << url << "\n";
-        return false;
-    }
-
-    httplib::Client client(origin);
-    client.set_follow_location(true);
-    client.set_connection_timeout(10);
-    client.set_read_timeout(15);
-
-    auto res = client.Get(path);
-    if (!res) {
-        std::cerr << "HTTP request failed: " << httplib::to_string(res.error())
-                  << "\n";
-        return false;
-    }
-    if (res->status < 200 || res->status >= 300) {
-        std::cerr << "HTTP error: " << res->status << "\n";
-        return false;
-    }
-
-    *out = std::move(res->body);
-    return true;
-}
-
-// A simple RGB image decoded into a flat pixel buffer.
-struct Image {
-    int width = 0;
-    int height = 0;
-    std::vector<uint8_t> pixels; // RGB, 3 bytes per pixel, row-major
-};
-
-bool decode_image(const std::string &bytes, Image *img) {
-    int w, h, channels;
-    const auto *raw = reinterpret_cast<const uint8_t *>(bytes.data());
-    uint8_t *data = stbi_load_from_memory(raw, static_cast<int>(bytes.size()),
-                                          &w, &h, &channels, 3 /* force RGB */);
-    if (!data) {
-        std::cerr << "stb_image decode failed: " << stbi_failure_reason()
-                  << "\n";
-        return false;
-    }
-    img->width = w;
-    img->height = h;
-    img->pixels.assign(data, data + (static_cast<size_t>(w) * h * 3));
-    stbi_image_free(data);
-    return true;
-}
-
-// Resizes `src` to `dst_size` x `dst_size` using bilinear sampling and
-// draws it into `canvas` at (offset_x, offset_y).
-void draw_resized_square(const Image &src, int dst_size, int offset_x,
-                         int offset_y, rgb_matrix::FrameCanvas *canvas) {
-    const float scale_x = static_cast<float>(src.width) / dst_size;
-    const float scale_y = static_cast<float>(src.height) / dst_size;
-
-    for (int y = 0; y < dst_size; ++y) {
-        for (int x = 0; x < dst_size; ++x) {
-            const float sx = x * scale_x;
-            const float sy = y * scale_y;
-
-            const int x0 = std::min(static_cast<int>(sx), src.width - 2);
-            const int y0 = std::min(static_cast<int>(sy), src.height - 2);
-            const float fx = sx - x0;
-            const float fy = sy - y0;
-
-            auto lerp = [](float a, float b, float t) {
-                return a + (b - a) * t;
-            };
-
-            uint8_t rgb[3];
-            for (int c = 0; c < 3; ++c) {
-                const float p00 = src.pixels[(y0 * src.width + x0) * 3 + c];
-                const float p10 = src.pixels[(y0 * src.width + x0 + 1) * 3 + c];
-                const float p01 =
-                    src.pixels[((y0 + 1) * src.width + x0) * 3 + c];
-                const float p11 =
-                    src.pixels[((y0 + 1) * src.width + x0 + 1) * 3 + c];
-                const float top = lerp(p00, p10, fx);
-                const float bottom = lerp(p01, p11, fx);
-                rgb[c] =
-                    static_cast<uint8_t>(std::round(lerp(top, bottom, fy)));
-            }
-
-            canvas->SetPixel(offset_x + x, offset_y + y, rgb[0], rgb[1],
-                             rgb[2]);
-        }
-    }
 }
 
 static int usage(const char *progname) {
@@ -226,6 +94,12 @@ std::string pad_utf8(const std::string &s, size_t width) {
     }
     size_t padding = (codepoints < width) ? width - codepoints : 0;
     return s + std::string(padding, ' ');
+}
+
+std::vector<SFChar> operator+(std::vector<SFChar> a,
+                              const std::vector<SFChar> &b) {
+    a.insert(a.end(), b.begin(), b.end());
+    return a;
 }
 
 int main(int argc, char *argv[]) {
@@ -335,147 +209,10 @@ int main(int argc, char *argv[]) {
 
     const Color SF_BLACK = {0, 0, 0};
 
-    const std::vector<SFChar> SF_BLOCK_CHARS = {
-        {"█", {255, 80, 80}}, {"█", {255, 160, 0}}, {"█", {255, 255, 0}},
-        {"█", {80, 255, 80}}, {"█", {0, 200, 255}}, {"█", {160, 80, 255}},
-    };
-
-    // charset is built with the current fg_default so normal glyphs carry that
-    // color. Block chars always keep their fixed colors.
-    auto sf_charset = [&](const Color &fg_default, bool block_chars) {
-        std::vector<SFChar> cs;
-
-        if (block_chars) {
-            for (auto &b : SF_BLOCK_CHARS) {
-                cs.push_back(b);
-            }
-        }
-
-        for (auto &g : std::vector<std::string>{
-                 " ", "A", "Ä", "B", "C", "D", "E",  "F", "G", "H", "I", "J",
-                 "K", "L", "M", "N", "O", "Ö", "P",  "Q", "R", "S", "T", "U",
-                 "Ü", "V", "W", "X", "Y", "Z", "a",  "ä", "b", "c", "d", "e",
-                 "f", "g", "h", "i", "j", "k", "l",  "m", "n", "o", "ö", "p",
-                 "q", "r", "s", "ß", "t", "u", "ü",  "v", "w", "x", "y", "z",
-                 "0", "1", "2", "3", "4", "5", "6",  "7", "8", "9", ".", ",",
-                 ":", ";", " ", "!", "?", "-", "–",  "(", ")", "/", "@", "#",
-                 "%", "&", "=", "+", "_", "'", "\"", "$", "€", "*"}) {
-            cs.push_back({g, fg_default});
-        }
-
-        return cs;
-    };
-
-    auto sf_charset_index = [&](const std::vector<SFChar> &charset,
-                                const std::string &glyph) {
-        int size = (int)charset.size();
-        for (int i = 0; i < size; ++i) {
-            if (charset[i].glyph == glyph) {
-                return i;
-            }
-        }
-        return 0;
-    };
-
-    auto sf_utf8_split = [](const std::string &s) {
-        std::vector<std::string> result;
-        size_t i = 0;
-        while (i < s.size()) {
-            unsigned char c = s[i];
-            int len = 1;
-            if ((c & 0xE0) == 0xC0) {
-                len = 2;
-            } else if ((c & 0xF0) == 0xE0) {
-                len = 3;
-            } else if ((c & 0xF8) == 0xF0) {
-                len = 4;
-            }
-            result.push_back(s.substr(i, len));
-            i += len;
-        }
-        return result;
-    };
-
-    struct SFCell {
-        int char_index = 0;
-        int target_index = 0;
-        int steps_left = 0;
-        bool flipping = false;
-        rgb_matrix::Color target_color = rgb_matrix::Color(255, 255, 255);
-    };
-
     std::vector<SFCell> cells(SF_NUM_CELLS);
     std::vector<SFChar> previous_target(SF_NUM_CELLS);
 
     auto sf_last_step = std::chrono::steady_clock::now();
-
-    auto sf_update_cells = [&](std::vector<SFCell> &cells,
-                               std::vector<SFChar> &last_target,
-                               const std::vector<SFChar> &new_target,
-                               const std::vector<SFChar> &charset) {
-        if (new_target == last_target) {
-            return;
-        }
-
-        last_target = new_target;
-        int charset_size = (int)charset.size();
-        for (int i = 0; i < SF_NUM_CELLS; ++i) {
-            const SFChar &tc = (i < (int)new_target.size())
-                                   ? new_target[i]
-                                   : SFChar{" ", SF_BLACK};
-            int ti = sf_charset_index(charset, tc.glyph);
-            int steps =
-                (ti - cells[i].char_index + charset_size) % charset_size;
-            cells[i].target_index = ti;
-            cells[i].target_color =
-                rgb_matrix::Color(tc.color.r, tc.color.g, tc.color.b);
-            cells[i].steps_left = steps;
-            cells[i].flipping = (steps > 0);
-        }
-    };
-
-    // During a flip the cell cycles through charset glyphs. Intermediate glyphs
-    // are drawn in fg_default; only the final target glyph gets target_color.
-    auto sf_render_cells = [&](std::vector<SFCell> &cells, bool step,
-                               const std::vector<SFChar> &charset,
-                               bool skip_first_display) {
-        int charset_size = (int)charset.size();
-        for (int i = 0; i < SF_NUM_CELLS; ++i) {
-            SFCell &cell = cells[i];
-            int row = i / SF_NUM_COLS;
-            int col = i % SF_NUM_COLS;
-            int px = 1 + col * (SF_CELL_W + SF_CELL_GAP);
-            int py = font.baseline() + row * SF_CELL_H;
-
-            // Use target color only when settled on the target glyph.
-            rgb_matrix::Color draw_color = cell.flipping
-                                               ? charset[cell.char_index].color
-                                               : cell.target_color;
-
-            const SFChar &sc = charset[cell.char_index];
-            rgb_matrix::DrawText(offscreen, font, px, py, draw_color, nullptr,
-                                 sc.glyph.c_str());
-
-            if (cell.flipping && step) {
-                cell.char_index = (cell.char_index + 1) % charset_size;
-                cell.steps_left--;
-                if (cell.steps_left <= 0) {
-                    cell.char_index = cell.target_index;
-                    cell.flipping = false;
-                }
-            }
-        }
-    };
-
-    auto sf_pad_line = [&](const std::string &s, const Color &color) {
-        auto cps = sf_utf8_split(s);
-        std::vector<SFChar> result;
-        for (int i = 0; i < SF_NUM_COLS; ++i) {
-            std::string glyph = (i < (int)cps.size()) ? cps[i] : " ";
-            result.push_back({glyph, color});
-        }
-        return result;
-    };
 
     auto build_footer_pages = [&](const std::string &text) {
         std::vector<std::string> pages;
@@ -567,9 +304,9 @@ int main(int argc, char *argv[]) {
         if (current_config->mode == TEXT) {
             auto t = text.load(std::memory_order_acquire);
             if (!t) {
-                new_target = sf_pad_line("No text set! Go to",
+                new_target = sf_pad_line(SF_NUM_COLS, "No text set! Go to",
                                          current_config->colors.fg_default) +
-                             sf_pad_line("ptrans.home.l3rchl.at",
+                             sf_pad_line(SF_NUM_COLS, "ptrans.home.l3rchl.at",
                                          current_config->colors.fg_default);
             } else {
                 auto cps = sf_utf8_split(*t);
@@ -687,8 +424,8 @@ int main(int argc, char *argv[]) {
                 new_target.clear();
                 for (int row = 0; row < SF_NUM_ROWS - 1; ++row) {
                     if (row >= (int)display_lines.size()) {
-                        auto padding =
-                            sf_pad_line("", current_config->colors.fg_default);
+                        auto padding = sf_pad_line(
+                            SF_NUM_COLS, "", current_config->colors.fg_default);
                         new_target.insert(new_target.end(), padding.begin(),
                                           padding.end());
                         continue;
@@ -760,9 +497,9 @@ int main(int argc, char *argv[]) {
                 }
             }
         } else {
-            new_target = sf_pad_line("No mode set! Go to",
+            new_target = sf_pad_line(SF_NUM_COLS, "No mode set! Go to",
                                      current_config->colors.fg_default) +
-                         sf_pad_line("ptrans.home.l3rchl.at",
+                         sf_pad_line(SF_NUM_COLS, "ptrans.home.l3rchl.at",
                                      current_config->colors.fg_default);
         }
 
@@ -796,9 +533,10 @@ int main(int argc, char *argv[]) {
             draw_resized_square(current_album_art, 64, 128, 0, offscreen);
         }
 
-        sf_update_cells(cells, previous_target, new_target, charset);
-        sf_render_cells(cells, step, charset,
-                        current_currently_playing ? true : false);
+        sf_update_cells(SF_NUM_CELLS, SF_BLACK, cells, previous_target,
+                        new_target, charset);
+        sf_render_cells(SF_NUM_CELLS, SF_NUM_COLS, SF_CELL_W, SF_CELL_H,
+                        SF_CELL_GAP, font, offscreen, cells, step, charset);
 
         if (current_currently_playing) {
             last_currently_playing = *current_currently_playing;

@@ -63,6 +63,10 @@ void to_json(json &j, const Colors &c) {
              {"fgPunctual", c.fg_punctual}};
 }
 
+bool Color::operator==(const Color &other) const {
+    return r == other.r && g == other.g && b == other.b;
+}
+
 Color::operator rgb_matrix::Color() const { return rgb_matrix::Color(r, g, b); }
 
 void from_json(const json &j, Configuration &c) {
