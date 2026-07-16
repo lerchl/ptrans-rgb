@@ -202,10 +202,14 @@ int main(int argc, char *argv[]) {
     const int SF_NUM_CELLS = SF_NUM_ROWS * SF_NUM_COLS;
 
     const int SF_COL_LINE = 3;
-    const int SF_COL_DEPS = 9;
+    const auto sf_col_deps = [](bool only_2_displays) {
+        return only_2_displays ? 3 : 9;
+    };
     const int SF_COL_SPACE = 2;
-    const int SF_COL_DIR =
-        SF_NUM_COLS - SF_COL_LINE - SF_COL_DEPS - SF_COL_SPACE;
+    const auto sf_col_dir = [&](bool only_2_displays) {
+        return SF_NUM_COLS - SF_COL_LINE - sf_col_deps(only_2_displays) -
+               SF_COL_SPACE;
+    };
 
     const Color SF_BLACK = {0, 0, 0};
 
@@ -434,6 +438,8 @@ int main(int argc, char *argv[]) {
                     auto &dl = display_lines[row];
 
                     // line name + direction in default color
+                    int SF_COL_DIR =
+                        sf_col_dir(current_currently_playing != nullptr);
                     std::string prefix = std::format(
                         "{:<{}} {:<{}} ", dl.line_name, SF_COL_LINE,
                         pad_utf8(dl.direction, SF_COL_DIR), SF_COL_DIR);
@@ -456,7 +462,9 @@ int main(int argc, char *argv[]) {
                         }
                     }
 
-                    int pad = SF_COL_DEPS - (int)dep_cells.size();
+                    int pad =
+                        sf_col_deps(current_currently_playing != nullptr) -
+                        (int)dep_cells.size();
                     for (int p = 0; p < pad; ++p) {
                         new_target.push_back(
                             {" ", current_config->colors.fg_default});
