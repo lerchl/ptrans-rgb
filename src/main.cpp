@@ -591,7 +591,8 @@ int main(int argc, char *argv[]) {
                       << current_album_art.height << "\n";
         }
 
-        if (current_album_art.width > 0) {
+        if (current_currently_playing->has_value() &&
+            current_album_art.width > 0) {
             draw_resized_square(current_album_art, 64, 128, 0, offscreen);
         }
 
