@@ -239,47 +239,47 @@ int main(int argc, char *argv[]) {
 
     auto sf_last_step = std::chrono::steady_clock::now();
 
-    auto build_footer_pages = [&](const std::string &text,
-                                  bool only_2_displays) {
-        std::vector<std::string> pages;
-
-        std::istringstream iss(text);
-        std::string word;
-        std::vector<std::string> words;
-
-        while (iss >> word) {
-            words.push_back(word);
-        }
-
-        // Worst case: " 99/99"
-        constexpr int PAGE_INDICATOR_WIDTH = 6;
-        const int TEXT_WIDTH =
-            sf_num_cols(only_2_displays) - PAGE_INDICATOR_WIDTH;
-
-        std::string current;
-
-        for (const auto &w : words) {
-            int needed = current.empty()
-                             ? (int)sf_utf8_split(w).size()
-                             : (int)sf_utf8_split(current + " " + w).size();
-
-            if (needed > TEXT_WIDTH) {
-                pages.push_back(current);
-                current = w;
-            } else {
-                if (!current.empty()) {
-                    current += ' ';
-                }
-                current += w;
-            }
-        }
-
-        if (!current.empty()) {
-            pages.push_back(current);
-        }
-
-        return pages;
-    };
+    // auto build_footer_pages = [&](const std::string &text,
+    //                               bool only_2_displays) {
+    //     std::vector<std::string> pages;
+    //
+    //     std::istringstream iss(text);
+    //     std::string word;
+    //     std::vector<std::string> words;
+    //
+    //     while (iss >> word) {
+    //         words.push_back(word);
+    //     }
+    //
+    //     // Worst case: " 99/99"
+    //     constexpr int PAGE_INDICATOR_WIDTH = 6;
+    //     const int TEXT_WIDTH =
+    //         sf_num_cols(only_2_displays) - PAGE_INDICATOR_WIDTH;
+    //
+    //     std::string current;
+    //
+    //     for (const auto &w : words) {
+    //         int needed = current.empty()
+    //                          ? (int)sf_utf8_split(w).size()
+    //                          : (int)sf_utf8_split(current + " " + w).size();
+    //
+    //         if (needed > TEXT_WIDTH) {
+    //             pages.push_back(current);
+    //             current = w;
+    //         } else {
+    //             if (!current.empty()) {
+    //                 current += ' ';
+    //             }
+    //             current += w;
+    //         }
+    //     }
+    //
+    //     if (!current.empty()) {
+    //         pages.push_back(current);
+    //     }
+    //
+    //     return pages;
+    // };
 
     bool lastFrameInBlackoutWindow = false;
     TimetableDto last_timetable;
@@ -367,8 +367,6 @@ int main(int argc, char *argv[]) {
             } else if (*tt == last_timetable &&
                        *current_currently_playing == last_currently_playing) {
                 new_target = last_target;
-                std::cout << "Same timetable, no rebuild neccessary"
-                          << std::endl;
             } else {
                 auto departure_color = [&](bool real_time, bool late,
                                            bool traffic_jam) -> Color {
@@ -471,39 +469,39 @@ int main(int argc, char *argv[]) {
                     }
                 }
 
-                if (tt->message.has_value()) {
-                    std::string footer_line = tt->message.value();
-                    if (footer_line.length() >
-                        static_cast<size_t>(sf_num_cols(
-                            current_currently_playing->has_value()))) {
-                        auto pages = build_footer_pages(
-                            footer_line,
-                            current_currently_playing->has_value());
-
-                        auto now = std::chrono::steady_clock::now();
-                        auto seconds =
-                            std::chrono::duration_cast<std::chrono::seconds>(
-                                now.time_since_epoch())
-                                .count();
-
-                        size_t page = (seconds / 5) % pages.size();
-
-                        std::string indicator =
-                            std::format("{}/{}", page + 1, pages.size());
-
-                        footer_line = std::format(
-                            "{:<{}}{:>{}}", pages[page],
-                            sf_num_cols(
-                                current_currently_playing->has_value()) -
-                                (int)indicator.size(),
-                            indicator, (int)indicator.size());
-                    }
-
-                    for (auto &cp : sf_utf8_split(footer_line)) {
-                        new_target.push_back(
-                            {cp, current_config->colors.fg_default});
-                    }
-                }
+                // if (tt->message.has_value()) {
+                //     std::string footer_line = tt->message.value();
+                //     if (footer_line.length() >
+                //         static_cast<size_t>(sf_num_cols(
+                //             current_currently_playing->has_value()))) {
+                //         auto pages = build_footer_pages(
+                //             footer_line,
+                //             current_currently_playing->has_value());
+                //
+                //         auto now = std::chrono::steady_clock::now();
+                //         auto seconds =
+                //             std::chrono::duration_cast<std::chrono::seconds>(
+                //                 now.time_since_epoch())
+                //                 .count();
+                //
+                //         size_t page = (seconds / 5) % pages.size();
+                //
+                //         std::string indicator =
+                //             std::format("{}/{}", page + 1, pages.size());
+                //
+                //         footer_line = std::format(
+                //             "{:<{}}{:>{}}", pages[page],
+                //             sf_num_cols(
+                //                 current_currently_playing->has_value()) -
+                //                 (int)indicator.size(),
+                //             indicator, (int)indicator.size());
+                //     }
+                //
+                //     for (auto &cp : sf_utf8_split(footer_line)) {
+                //         new_target.push_back(
+                //             {cp, current_config->colors.fg_default});
+                //     }
+                // }
 
                 last_timetable = *tt;
             }
