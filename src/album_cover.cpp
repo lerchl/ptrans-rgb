@@ -106,7 +106,7 @@ void draw_resized_square(const Image &src, int dst_size, int offset_x,
 
 void draw_spinning_circle(const Image &src, float angle_radians, int dst_size,
                           int offset_x, int offset_y,
-                          rgb_matrix::FrameCanvas *canvas) {
+                          rgb_matrix::FrameCanvas *canvas, float padding) {
     if (src.width < 2 || src.height < 2 || src.pixels.empty()) {
         return;
     }
@@ -114,14 +114,15 @@ void draw_spinning_circle(const Image &src, float angle_radians, int dst_size,
     const float sin_a = std::sin(angle_radians);
     const float src_cx = src.width / 2.0f;
     const float src_cy = src.height / 2.0f;
-    const float scale =
-        std::min(src.width, src.height) / static_cast<float>(dst_size);
     const float dst_c = dst_size / 2.0f;
     const float radius = dst_size / 2.0f;
     const float radius_sq = radius * radius;
 
-    // Vinyl center hole — tune the fraction to taste (~8-10% of the
-    // record's radius looks about right for a label-hole size).
+    // Shrink the area the album art actually gets drawn into, leaving
+    // `padding` px of empty space between the art and the disc edge.
+    const float art_radius = radius - padding;
+    const float scale = std::min(src.width, src.height) / (art_radius * 2.0f);
+
     const float hole_radius = radius * 0.05f;
     const float hole_radius_sq = hole_radius * hole_radius;
 
@@ -142,7 +143,8 @@ void draw_spinning_circle(const Image &src, float angle_radians, int dst_size,
             const float sy = src_cy + ry * scale;
             if (sx < 0 || sy < 0 || sx >= src.width - 1 ||
                 sy >= src.height - 1) {
-                continue;
+                continue; // maps outside the source image — leave background
+                          // showing
             }
             const int x0 = static_cast<int>(sx);
             const int y0 = static_cast<int>(sy);

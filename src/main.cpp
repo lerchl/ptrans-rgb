@@ -565,7 +565,7 @@ int main(int argc, char *argv[]) {
         if (current_currently_playing->has_value() &&
             current_album_art.width > 0) {
             draw_spinning_circle(current_album_art, album_art_angle, 64, 0, 0,
-                                 offscreen);
+                                 offscreen, 2.0f);
         }
 
         sf_update_cells(sf_num_cells(current_currently_playing->has_value()),

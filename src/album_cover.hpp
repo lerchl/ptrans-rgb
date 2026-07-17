@@ -31,4 +31,4 @@ void draw_resized_square(const Image &src, int dst_size, int offset_x,
 // you've already cleared/filled the canvas background before calling this.
 void draw_spinning_circle(const Image &src, float angle_radians, int dst_size,
                           int offset_x, int offset_y,
-                          rgb_matrix::FrameCanvas *canvas);
+                          rgb_matrix::FrameCanvas *canvas, float padding);
