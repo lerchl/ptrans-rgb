@@ -591,9 +591,26 @@ int main(int argc, char *argv[]) {
                       << current_album_art.height << "\n";
         }
 
+        static float album_art_angle = 0.0f;
+        const float rotations_per_second = 0.3f; // tune to taste
+        const float angle_step =
+            (2.0f * static_cast<float>(M_PI) * rotations_per_second) /
+            (1000.0f / SF_MS_PER_STEP);
+
+        bool is_playing = current_currently_playing->has_value() &&
+                          !current_currently_playing->value().is_paused;
+
+        if (is_playing) {
+            album_art_angle += angle_step;
+            if (album_art_angle > 2.0f * static_cast<float>(M_PI)) {
+                album_art_angle -= 2.0f * static_cast<float>(M_PI);
+            }
+        }
+
         if (current_currently_playing->has_value() &&
             current_album_art.width > 0) {
-            draw_resized_square(current_album_art, 64, 128, 0, offscreen);
+            draw_spinning_circle(current_album_art, album_art_angle, 64, 128, 0,
+                                 offscreen);
         }
 
         sf_update_cells(sf_num_cells(current_currently_playing->has_value()),
@@ -603,9 +620,7 @@ int main(int argc, char *argv[]) {
                         SF_CELL_W, SF_CELL_H, SF_CELL_GAP, font, offscreen,
                         cells, step, charset);
 
-        if (current_currently_playing) {
-            last_currently_playing = *current_currently_playing;
-        }
+        last_currently_playing = *current_currently_playing;
 
         offscreen = matrix->SwapOnVSync(offscreen);
     }

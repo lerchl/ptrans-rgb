@@ -103,3 +103,71 @@ void draw_resized_square(const Image &src, int dst_size, int offset_x,
         }
     }
 }
+
+void draw_spinning_circle(const Image &src, float angle_radians, int dst_size,
+                          int offset_x, int offset_y,
+                          rgb_matrix::FrameCanvas *canvas) {
+    if (src.width < 2 || src.height < 2 || src.pixels.empty()) {
+        return;
+    }
+
+    const float cos_a = std::cos(angle_radians);
+    const float sin_a = std::sin(angle_radians);
+
+    const float src_cx = src.width / 2.0f;
+    const float src_cy = src.height / 2.0f;
+    const float scale =
+        std::min(src.width, src.height) / static_cast<float>(dst_size);
+
+    const float dst_c = dst_size / 2.0f;
+    const float radius = dst_size / 2.0f;
+    const float radius_sq = radius * radius;
+
+    auto lerp = [](float a, float b, float t) { return a + (b - a) * t; };
+
+    for (int y = 0; y < dst_size; ++y) {
+        for (int x = 0; x < dst_size; ++x) {
+            // Distance from center, in destination space — used for the
+            // circular mask.
+            const float dx = x - dst_c + 0.5f;
+            const float dy = y - dst_c + 0.5f;
+            if (dx * dx + dy * dy > radius_sq) {
+                continue; // outside the circle, skip entirely
+            }
+
+            // Inverse-rotate to find the corresponding source pixel.
+            const float rx = dx * cos_a + dy * sin_a;
+            const float ry = -dx * sin_a + dy * cos_a;
+
+            const float sx = src_cx + rx * scale;
+            const float sy = src_cy + ry * scale;
+
+            if (sx < 0 || sy < 0 || sx >= src.width - 1 ||
+                sy >= src.height - 1) {
+                continue;
+            }
+
+            const int x0 = static_cast<int>(sx);
+            const int y0 = static_cast<int>(sy);
+            const float fx = sx - x0;
+            const float fy = sy - y0;
+
+            uint8_t rgb[3];
+            for (int c = 0; c < 3; ++c) {
+                const float p00 = src.pixels[(y0 * src.width + x0) * 3 + c];
+                const float p10 = src.pixels[(y0 * src.width + x0 + 1) * 3 + c];
+                const float p01 =
+                    src.pixels[((y0 + 1) * src.width + x0) * 3 + c];
+                const float p11 =
+                    src.pixels[((y0 + 1) * src.width + x0 + 1) * 3 + c];
+                const float top = lerp(p00, p10, fx);
+                const float bottom = lerp(p01, p11, fx);
+                rgb[c] =
+                    static_cast<uint8_t>(std::round(lerp(top, bottom, fy)));
+            }
+
+            canvas->SetPixel(offset_x + x, offset_y + y, rgb[0], rgb[1],
+                             rgb[2]);
+        }
+    }
+}

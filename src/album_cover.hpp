@@ -24,3 +24,11 @@ bool decode_image(const std::string &bytes, Image *img);
 // draws it into `canvas` at (offset_x, offset_y).
 void draw_resized_square(const Image &src, int dst_size, int offset_x,
                          int offset_y, rgb_matrix::FrameCanvas *canvas);
+
+// Rotates `src` by `angle_radians` around its own center, crops to a circle
+// of diameter `dst_size`, and draws it into `canvas` at (offset_x, offset_y).
+// Pixels outside the circle are left untouched (transparent), so make sure
+// you've already cleared/filled the canvas background before calling this.
+void draw_spinning_circle(const Image &src, float angle_radians, int dst_size,
+                          int offset_x, int offset_y,
+                          rgb_matrix::FrameCanvas *canvas);
