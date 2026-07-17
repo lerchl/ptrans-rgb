@@ -367,6 +367,8 @@ int main(int argc, char *argv[]) {
             } else if (*tt == last_timetable &&
                        *current_currently_playing == last_currently_playing) {
                 new_target = last_target;
+                std::cout << "Same timetable, no rebuild neccessary"
+                          << std::endl;
             } else {
                 auto departure_color = [&](bool real_time, bool late,
                                            bool traffic_jam) -> Color {
@@ -484,7 +486,7 @@ int main(int argc, char *argv[]) {
                                 now.time_since_epoch())
                                 .count();
 
-                        size_t page = (seconds / 10) % pages.size();
+                        size_t page = (seconds / 5) % pages.size();
 
                         std::string indicator =
                             std::format("{}/{}", page + 1, pages.size());
@@ -528,17 +530,16 @@ int main(int argc, char *argv[]) {
                 std::cerr << "Failed to download image from "
                           << current_currently_playing->value()
                                  .album_cover_url.value()
-                          << "\n";
-                return 1;
+                          << std::endl;
+                current_album_art = Image();
             }
-            std::cout << "Downloaded" << std::endl;
-
             if (!decode_image(raw_bytes, &current_album_art)) {
-                std::cerr << "Failed to decode image\n";
-                return 1;
+                std::cerr << "Failed to decode image from "
+                          << current_currently_playing->value()
+                                 .album_cover_url.value()
+                          << std::endl;
+                current_album_art = Image();
             }
-            std::cout << "Decoded image: " << current_album_art.width << "x"
-                      << current_album_art.height << "\n";
         }
 
         static float album_art_angle = 0.0f;

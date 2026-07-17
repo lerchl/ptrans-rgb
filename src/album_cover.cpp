@@ -122,7 +122,7 @@ void draw_spinning_circle(const Image &src, float angle_radians, int dst_size,
 
     // Vinyl center hole — tune the fraction to taste (~8-10% of the
     // record's radius looks about right for a label-hole size).
-    const float hole_radius = radius * 0.08f;
+    const float hole_radius = radius * 0.05f;
     const float hole_radius_sq = hole_radius * hole_radius;
 
     auto lerp = [](float a, float b, float t) { return a + (b - a) * t; };
