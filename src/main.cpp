@@ -592,7 +592,7 @@ int main(int argc, char *argv[]) {
         }
 
         static float album_art_angle = 0.0f;
-        const float rotations_per_second = 0.3f; // tune to taste
+        const float rotations_per_second = 0.1f; // tune to taste
         const float angle_step =
             (2.0f * static_cast<float>(M_PI) * rotations_per_second) /
             (1000.0f / SF_MS_PER_STEP);
