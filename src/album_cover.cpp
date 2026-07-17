@@ -110,48 +110,44 @@ void draw_spinning_circle(const Image &src, float angle_radians, int dst_size,
     if (src.width < 2 || src.height < 2 || src.pixels.empty()) {
         return;
     }
-
     const float cos_a = std::cos(angle_radians);
     const float sin_a = std::sin(angle_radians);
-
     const float src_cx = src.width / 2.0f;
     const float src_cy = src.height / 2.0f;
     const float scale =
         std::min(src.width, src.height) / static_cast<float>(dst_size);
-
     const float dst_c = dst_size / 2.0f;
     const float radius = dst_size / 2.0f;
     const float radius_sq = radius * radius;
 
-    auto lerp = [](float a, float b, float t) { return a + (b - a) * t; };
+    // Vinyl center hole — tune the fraction to taste (~8-10% of the
+    // record's radius looks about right for a label-hole size).
+    const float hole_radius = radius * 0.08f;
+    const float hole_radius_sq = hole_radius * hole_radius;
 
+    auto lerp = [](float a, float b, float t) { return a + (b - a) * t; };
     for (int y = 0; y < dst_size; ++y) {
         for (int x = 0; x < dst_size; ++x) {
-            // Distance from center, in destination space — used for the
-            // circular mask.
             const float dx = x - dst_c + 0.5f;
             const float dy = y - dst_c + 0.5f;
-            if (dx * dx + dy * dy > radius_sq) {
-                continue; // outside the circle, skip entirely
+            const float dist_sq = dx * dx + dy * dy;
+
+            if (dist_sq > radius_sq || dist_sq < hole_radius_sq) {
+                continue; // outside the disc, or inside the center hole
             }
 
-            // Inverse-rotate to find the corresponding source pixel.
             const float rx = dx * cos_a + dy * sin_a;
             const float ry = -dx * sin_a + dy * cos_a;
-
             const float sx = src_cx + rx * scale;
             const float sy = src_cy + ry * scale;
-
             if (sx < 0 || sy < 0 || sx >= src.width - 1 ||
                 sy >= src.height - 1) {
                 continue;
             }
-
             const int x0 = static_cast<int>(sx);
             const int y0 = static_cast<int>(sy);
             const float fx = sx - x0;
             const float fy = sy - y0;
-
             uint8_t rgb[3];
             for (int c = 0; c < 3; ++c) {
                 const float p00 = src.pixels[(y0 * src.width + x0) * 3 + c];
@@ -165,7 +161,6 @@ void draw_spinning_circle(const Image &src, float angle_radians, int dst_size,
                 rgb[c] =
                     static_cast<uint8_t>(std::round(lerp(top, bottom, fy)));
             }
-
             canvas->SetPixel(offset_x + x, offset_y + y, rgb[0], rgb[1],
                              rgb[2]);
         }
