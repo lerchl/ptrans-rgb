@@ -504,6 +504,8 @@ int main(int argc, char *argv[]) {
                             {cp, current_config->colors.fg_default});
                     }
                 }
+
+                last_timetable = *tt;
             }
         } else {
             new_target =
