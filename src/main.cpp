@@ -87,14 +87,27 @@ Time nowTime() {
 }
 
 std::string pad_utf8(const std::string &s, size_t width) {
+    // Find the byte offset where the `width`-th codepoint starts (if any),
+    // so we can truncate without splitting a multi-byte UTF-8 sequence.
     size_t codepoints = 0;
-    for (unsigned char c : s) {
+    size_t truncate_at = s.size(); // default: no truncation needed
+
+    for (size_t i = 0; i < s.size();) {
+        unsigned char c = s[i];
         if ((c & 0xC0) != 0x80) {
+            if (codepoints == width) {
+                truncate_at = i;
+                break;
+            }
             codepoints++;
         }
+        ++i;
     }
+
+    std::string truncated = s.substr(0, truncate_at);
+
     size_t padding = (codepoints < width) ? width - codepoints : 0;
-    return s + std::string(padding, ' ');
+    return truncated + std::string(padding, ' ');
 }
 
 std::vector<SFChar> operator+(std::vector<SFChar> a,
@@ -592,16 +605,20 @@ int main(int argc, char *argv[]) {
         }
 
         static float album_art_angle = 0.0f;
-        const float rotations_per_second = 0.1f; // tune to taste
-        const float angle_step =
-            (2.0f * static_cast<float>(M_PI) * rotations_per_second) /
-            (1000.0f / SF_MS_PER_STEP);
+        static auto album_art_last_update = std::chrono::steady_clock::now();
+        const float rotations_per_second = 0.05f; // tune to taste
+
+        auto now = std::chrono::steady_clock::now();
+        float delta_seconds =
+            std::chrono::duration<float>(now - album_art_last_update).count();
+        album_art_last_update = now;
 
         bool is_playing = current_currently_playing->has_value() &&
                           !current_currently_playing->value().is_paused;
 
         if (is_playing) {
-            album_art_angle += angle_step;
+            album_art_angle += 2.0f * static_cast<float>(M_PI) *
+                               rotations_per_second * delta_seconds;
             if (album_art_angle > 2.0f * static_cast<float>(M_PI)) {
                 album_art_angle -= 2.0f * static_cast<float>(M_PI);
             }
