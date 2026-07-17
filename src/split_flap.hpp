@@ -45,4 +45,4 @@ void sf_render_cells(int num_cells, int num_cols, int cell_w, int cell_h,
                      int cell_gap, const rgb_matrix::Font &font,
                      rgb_matrix::FrameCanvas *offscreen,
                      std::vector<SFCell> &cells, bool step,
-                     const std::vector<SFChar> &charset);
+                     const std::vector<SFChar> &charset, int offset_x);

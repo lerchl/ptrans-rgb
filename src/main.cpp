@@ -564,7 +564,7 @@ int main(int argc, char *argv[]) {
 
         if (current_currently_playing->has_value() &&
             current_album_art.width > 0) {
-            draw_spinning_circle(current_album_art, album_art_angle, 64, 128, 0,
+            draw_spinning_circle(current_album_art, album_art_angle, 64, 0, 0,
                                  offscreen);
         }
 
@@ -573,7 +573,8 @@ int main(int argc, char *argv[]) {
         sf_render_cells(sf_num_cells(current_currently_playing->has_value()),
                         sf_num_cols(current_currently_playing->has_value()),
                         SF_CELL_W, SF_CELL_H, SF_CELL_GAP, font, offscreen,
-                        cells, step, charset);
+                        cells, step, charset,
+                        current_currently_playing->has_value() ? 64 : 0);
 
         last_target = new_target;
         last_currently_playing = *current_currently_playing;

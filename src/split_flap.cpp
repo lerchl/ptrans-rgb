@@ -99,13 +99,13 @@ void sf_render_cells(int num_cells, int num_cols, int cell_w, int cell_h,
                      int cell_gap, const rgb_matrix::Font &font,
                      rgb_matrix::FrameCanvas *offscreen,
                      std::vector<SFCell> &cells, bool step,
-                     const std::vector<SFChar> &charset) {
+                     const std::vector<SFChar> &charset, int offset_x) {
     int charset_size = (int)charset.size();
     for (int i = 0; i < num_cells; ++i) {
         SFCell &cell = cells[i];
         int row = i / num_cols;
         int col = i % num_cols;
-        int px = 1 + col * (cell_w + cell_gap);
+        int px = offset_x + 1 + col * (cell_w + cell_gap);
         int py = font.baseline() + row * cell_h;
 
         // Use target color only when settled on the target glyph.
