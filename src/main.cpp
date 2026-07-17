@@ -11,6 +11,7 @@
 #include <iostream>
 #include <memory>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -170,7 +171,8 @@ int main(int argc, char *argv[]) {
     std::atomic<std::shared_ptr<const std::string>> text;
     std::atomic<std::shared_ptr<TimetableDto>> timetable;
     std::atomic<std::shared_ptr<std::optional<CurrentlyPlayingDto>>>
-        currently_playing;
+        currently_playing =
+            std::make_shared<std::optional<CurrentlyPlayingDto>>(std::nullopt);
 
     auto run_http_server = make_http_server(APP_VERSION, config_manager, text);
     auto run_timetable_job =
