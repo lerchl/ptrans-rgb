@@ -169,7 +169,8 @@ int main(int argc, char *argv[]) {
 
     std::atomic<std::shared_ptr<const std::string>> text;
     std::atomic<std::shared_ptr<TimetableDto>> timetable;
-    std::atomic<std::shared_ptr<CurrentlyPlayingDto>> currently_playing;
+    std::atomic<std::shared_ptr<std::optional<CurrentlyPlayingDto>>>
+        currently_playing;
 
     auto run_http_server = make_http_server(APP_VERSION, config_manager, text);
     auto run_timetable_job =
@@ -186,7 +187,9 @@ int main(int argc, char *argv[]) {
     // --- Derived layout constants ---
     // Matrix dimensions come from the matrix itself, so --led-chain etc.
     // are respected
-    const int SF_MATRIX_W = matrix->width() - 64;
+    const auto sf_matrix_w = [&](bool only_2_displays) {
+        return only_2_displays ? matrix->width() - 64 : matrix->width();
+    };
     const int SF_MATRIX_H = matrix->height();
     const int SF_MS_PER_STEP = 25;
 
@@ -198,8 +201,12 @@ int main(int argc, char *argv[]) {
     const int SF_CELL_W = SF_CHAR_W;
 
     const int SF_NUM_ROWS = SF_MATRIX_H / SF_CELL_H;
-    const int SF_NUM_COLS = SF_MATRIX_W / (SF_CELL_W + SF_CELL_GAP);
-    const int SF_NUM_CELLS = SF_NUM_ROWS * SF_NUM_COLS;
+    const auto sf_num_cols = [&](bool only_2_displays) {
+        return sf_matrix_w(only_2_displays) / (SF_CELL_W + SF_CELL_GAP);
+    };
+    const auto sf_num_cells = [&](bool only_2_displays) {
+        return SF_NUM_ROWS * sf_num_cols(only_2_displays);
+    };
 
     const int SF_COL_LINE = 3;
     const auto sf_col_deps = [](bool only_2_displays) {
@@ -207,18 +214,19 @@ int main(int argc, char *argv[]) {
     };
     const int SF_COL_SPACE = 2;
     const auto sf_col_dir = [&](bool only_2_displays) {
-        return SF_NUM_COLS - SF_COL_LINE - sf_col_deps(only_2_displays) -
-               SF_COL_SPACE;
+        return sf_num_cols(only_2_displays) - SF_COL_LINE -
+               sf_col_deps(only_2_displays) - SF_COL_SPACE;
     };
 
     const Color SF_BLACK = {0, 0, 0};
 
-    std::vector<SFCell> cells(SF_NUM_CELLS);
-    std::vector<SFChar> previous_target(SF_NUM_CELLS);
+    std::vector<SFCell> cells(sf_num_cells(false));
+    std::vector<SFChar> previous_target(sf_num_cells(false));
 
     auto sf_last_step = std::chrono::steady_clock::now();
 
-    auto build_footer_pages = [&](const std::string &text) {
+    auto build_footer_pages = [&](const std::string &text,
+                                  bool only_2_displays) {
         std::vector<std::string> pages;
 
         std::istringstream iss(text);
@@ -231,7 +239,8 @@ int main(int argc, char *argv[]) {
 
         // Worst case: " 99/99"
         constexpr int PAGE_INDICATOR_WIDTH = 6;
-        const int TEXT_WIDTH = SF_NUM_COLS - PAGE_INDICATOR_WIDTH;
+        const int TEXT_WIDTH =
+            sf_num_cols(only_2_displays) - PAGE_INDICATOR_WIDTH;
 
         std::string current;
 
@@ -259,7 +268,7 @@ int main(int argc, char *argv[]) {
     };
 
     bool lastFrameInBlackoutWindow = false;
-    CurrentlyPlayingDto last_currently_playing;
+    std::optional<CurrentlyPlayingDto> last_currently_playing;
     Image current_album_art;
 
     for (;;) {
@@ -308,14 +317,22 @@ int main(int argc, char *argv[]) {
         if (current_config->mode == TEXT) {
             auto t = text.load(std::memory_order_acquire);
             if (!t) {
-                new_target = sf_pad_line(SF_NUM_COLS, "No text set! Go to",
-                                         current_config->colors.fg_default) +
-                             sf_pad_line(SF_NUM_COLS, "ptrans.home.l3rchl.at",
-                                         current_config->colors.fg_default);
+                new_target =
+                    sf_pad_line(
+                        sf_num_cols(current_currently_playing->has_value()),
+                        "No text set! Go to",
+                        current_config->colors.fg_default) +
+                    sf_pad_line(
+                        sf_num_cols(current_currently_playing->has_value()),
+                        "ptrans.home.l3rchl.at",
+                        current_config->colors.fg_default);
             } else {
                 auto cps = sf_utf8_split(*t);
-                new_target.resize(SF_NUM_CELLS);
-                for (int i = 0; i < SF_NUM_CELLS; ++i) {
+                new_target.resize(
+                    sf_num_cells(current_currently_playing->has_value()));
+                for (int i = 0;
+                     i < sf_num_cells(current_currently_playing->has_value());
+                     ++i) {
                     new_target[i] = {i < std::ssize(cps) ? cps[i] : " ",
                                      current_config->colors.fg_default};
                 }
@@ -325,7 +342,10 @@ int main(int argc, char *argv[]) {
             if (!tt) {
                 charset = sf_charset(current_config->colors.fg_default, false);
                 const int charset_size = (int)charset.size();
-                const int perimeter_len = 2 * (SF_NUM_ROWS + SF_NUM_COLS) - 4;
+                const int perimeter_len =
+                    2 * (SF_NUM_ROWS +
+                         sf_num_cols(current_currently_playing->has_value())) -
+                    4;
 
                 static int frame_t = 0;
                 static int revealed = 0;
@@ -336,16 +356,26 @@ int main(int argc, char *argv[]) {
                 const std::string WAITING = "Waiting for timetable";
                 auto waiting_cps = sf_utf8_split(WAITING);
                 int text_start_col =
-                    (SF_NUM_COLS - (int)waiting_cps.size()) / 2;
+                    (sf_num_cols(current_currently_playing->has_value()) -
+                     (int)waiting_cps.size()) /
+                    2;
                 int text_row = SF_NUM_ROWS / 2;
 
-                new_target.resize(SF_NUM_CELLS);
-                for (int i = 0; i < SF_NUM_CELLS; ++i) {
-                    int col = i % SF_NUM_COLS;
-                    int row = i / SF_NUM_COLS;
+                new_target.resize(
+                    sf_num_cells(current_currently_playing->has_value()));
+                for (int i = 0;
+                     i < sf_num_cells(current_currently_playing->has_value());
+                     ++i) {
+                    int col =
+                        i % sf_num_cols(current_currently_playing->has_value());
+                    int row =
+                        i / sf_num_cols(current_currently_playing->has_value());
 
-                    bool is_frame = (row == 0 || row == SF_NUM_ROWS - 1 ||
-                                     col == 0 || col == SF_NUM_COLS - 1);
+                    bool is_frame =
+                        (row == 0 || row == SF_NUM_ROWS - 1 || col == 0 ||
+                         col == sf_num_cols(
+                                    current_currently_playing->has_value()) -
+                                    1);
                     bool is_text =
                         (row == text_row && col >= text_start_col &&
                          col < text_start_col + (int)waiting_cps.size());
@@ -358,11 +388,21 @@ int main(int argc, char *argv[]) {
                         int perimeter_pos =
                             (col == 0)                 ? row
                             : (row == SF_NUM_ROWS - 1) ? (SF_NUM_ROWS - 1 + col)
-                            : (col == SF_NUM_COLS - 1)
-                                ? (SF_NUM_ROWS - 1 + SF_NUM_COLS - 1 +
-                                   (SF_NUM_ROWS - 1 - row))
-                                : (2 * (SF_NUM_ROWS - 1) + SF_NUM_COLS - 1 +
-                                   (SF_NUM_COLS - 1 - col));
+                            : (col ==
+                               sf_num_cols(
+                                   current_currently_playing->has_value()) -
+                                   1)
+                                ? (SF_NUM_ROWS - 1 +
+                                   sf_num_cols(
+                                       current_currently_playing->has_value()) -
+                                   1 + (SF_NUM_ROWS - 1 - row))
+                                : (2 * (SF_NUM_ROWS - 1) +
+                                   sf_num_cols(
+                                       current_currently_playing->has_value()) -
+                                   1 +
+                                   (sf_num_cols(current_currently_playing
+                                                    ->has_value()) -
+                                    1 - col));
 
                         if (perimeter_pos < revealed) {
                             int idx = (perimeter_pos + frame_t) % charset_size;
@@ -408,7 +448,8 @@ int main(int argc, char *argv[]) {
 
                     for (auto &&dep :
                          trip.departures |
-                             std::views::take(current_currently_playing ? 1
+                             std::views::take(
+                                 current_currently_playing->has_value() ? 1
                                                                         : 3)) {
                         std::string s = dep.countdown == 0
                                             ? "*"
@@ -429,7 +470,8 @@ int main(int argc, char *argv[]) {
                 for (int row = 0; row < SF_NUM_ROWS - 1; ++row) {
                     if (row >= (int)display_lines.size()) {
                         auto padding = sf_pad_line(
-                            SF_NUM_COLS, "", current_config->colors.fg_default);
+                            sf_num_cols(current_currently_playing->has_value()),
+                            "", current_config->colors.fg_default);
                         new_target.insert(new_target.end(), padding.begin(),
                                           padding.end());
                         continue;
@@ -439,7 +481,7 @@ int main(int argc, char *argv[]) {
 
                     // line name + direction in default color
                     int SF_COL_DIR =
-                        sf_col_dir(current_currently_playing != nullptr);
+                        sf_col_dir(current_currently_playing->has_value());
                     std::string prefix = std::format(
                         "{:<{}} {:<{}} ", dl.line_name, SF_COL_LINE,
                         pad_utf8(dl.direction, SF_COL_DIR), SF_COL_DIR);
@@ -463,7 +505,7 @@ int main(int argc, char *argv[]) {
                     }
 
                     int pad =
-                        sf_col_deps(current_currently_playing != nullptr) -
+                        sf_col_deps(current_currently_playing->has_value()) -
                         (int)dep_cells.size();
                     for (int p = 0; p < pad; ++p) {
                         new_target.push_back(
@@ -478,8 +520,11 @@ int main(int argc, char *argv[]) {
                 if (tt->message.has_value()) {
                     std::string footer_line = tt->message.value();
                     if (footer_line.length() >
-                        static_cast<size_t>(SF_NUM_COLS)) {
-                        auto pages = build_footer_pages(footer_line);
+                        static_cast<size_t>(sf_num_cols(
+                            current_currently_playing->has_value()))) {
+                        auto pages = build_footer_pages(
+                            footer_line,
+                            current_currently_playing->has_value());
 
                         auto now = std::chrono::steady_clock::now();
                         auto seconds =
@@ -492,10 +537,12 @@ int main(int argc, char *argv[]) {
                         std::string indicator =
                             std::format("{}/{}", page + 1, pages.size());
 
-                        footer_line =
-                            std::format("{:<{}}{:>{}}", pages[page],
-                                        SF_NUM_COLS - (int)indicator.size(),
-                                        indicator, (int)indicator.size());
+                        footer_line = std::format(
+                            "{:<{}}{:>{}}", pages[page],
+                            sf_num_cols(
+                                current_currently_playing->has_value()) -
+                                (int)indicator.size(),
+                            indicator, (int)indicator.size());
                     }
 
                     for (auto &cp : sf_utf8_split(footer_line)) {
@@ -505,25 +552,30 @@ int main(int argc, char *argv[]) {
                 }
             }
         } else {
-            new_target = sf_pad_line(SF_NUM_COLS, "No mode set! Go to",
-                                     current_config->colors.fg_default) +
-                         sf_pad_line(SF_NUM_COLS, "ptrans.home.l3rchl.at",
-                                     current_config->colors.fg_default);
+            new_target =
+                sf_pad_line(sf_num_cols(current_currently_playing->has_value()),
+                            "No mode set! Go to",
+                            current_config->colors.fg_default) +
+                sf_pad_line(sf_num_cols(current_currently_playing->has_value()),
+                            "ptrans.home.l3rchl.at",
+                            current_config->colors.fg_default);
         }
 
         offscreen->Fill(bg_color.r, bg_color.g, bg_color.b);
 
-        if (current_currently_playing &&
-            current_currently_playing->album_cover_url.has_value() &&
-            (!last_currently_playing.album_cover_url.has_value() ||
-             last_currently_playing.album_cover_url.value() !=
-                 current_currently_playing->album_cover_url.value())) {
+        if (current_currently_playing->has_value() &&
+            current_currently_playing->value().album_cover_url.has_value() &&
+            (!last_currently_playing.has_value() ||
+             !last_currently_playing.value().album_cover_url.has_value() ||
+             last_currently_playing.value().album_cover_url.value() !=
+                 current_currently_playing->value().album_cover_url.value())) {
             std::string raw_bytes;
             if (!download_to_memory(
-                    current_currently_playing->album_cover_url.value(),
+                    current_currently_playing->value().album_cover_url.value(),
                     &raw_bytes)) {
                 std::cerr << "Failed to download image from "
-                          << current_currently_playing->album_cover_url.value()
+                          << current_currently_playing->value()
+                                 .album_cover_url.value()
                           << "\n";
                 return 1;
             }
@@ -541,10 +593,12 @@ int main(int argc, char *argv[]) {
             draw_resized_square(current_album_art, 64, 128, 0, offscreen);
         }
 
-        sf_update_cells(SF_NUM_CELLS, SF_BLACK, cells, previous_target,
-                        new_target, charset);
-        sf_render_cells(SF_NUM_CELLS, SF_NUM_COLS, SF_CELL_W, SF_CELL_H,
-                        SF_CELL_GAP, font, offscreen, cells, step, charset);
+        sf_update_cells(sf_num_cells(current_currently_playing->has_value()),
+                        SF_BLACK, cells, previous_target, new_target, charset);
+        sf_render_cells(sf_num_cells(current_currently_playing->has_value()),
+                        sf_num_cols(current_currently_playing->has_value()),
+                        SF_CELL_W, SF_CELL_H, SF_CELL_GAP, font, offscreen,
+                        cells, step, charset);
 
         if (current_currently_playing) {
             last_currently_playing = *current_currently_playing;

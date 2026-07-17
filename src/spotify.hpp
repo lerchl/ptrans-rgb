@@ -15,4 +15,5 @@ void from_json(const json &j, CurrentlyPlayingDto &d);
 std::function<void(std::string)> make_spotify_job(
     std::condition_variable &app_cv, std::mutex &app_mutex,
     const std::atomic<bool> &app_running,
-    std::atomic<std::shared_ptr<CurrentlyPlayingDto>> &currently_playing);
+    std::atomic<std::shared_ptr<std::optional<CurrentlyPlayingDto>>>
+        &currently_playing);

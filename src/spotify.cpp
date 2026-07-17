@@ -2,6 +2,7 @@
 #include <condition_variable>
 #include <functional>
 #include <httplib.h>
+#include <optional>
 
 #include "error.hpp"
 #include "spotify.hpp"
@@ -20,7 +21,8 @@ CurrentlyPlayingDto parse_currently_playing(const std::string &body) {
 std::function<void(std::string)> make_spotify_job(
     std::condition_variable &app_cv, std::mutex &app_mutex,
     const std::atomic<bool> &app_running,
-    std::atomic<std::shared_ptr<CurrentlyPlayingDto>> &currentlyPlaying) {
+    std::atomic<std::shared_ptr<std::optional<CurrentlyPlayingDto>>>
+        &currentlyPlaying) {
     return
         [&app_cv, &app_mutex, &app_running,
          &currentlyPlaying](std::string data_url) {
@@ -37,11 +39,15 @@ std::function<void(std::string)> make_spotify_job(
                               << std::endl;
                 } else if (result->status == 200) {
                     currentlyPlaying.store(
-                        std::make_shared<CurrentlyPlayingDto>(
-                            parse_currently_playing(result->body)),
+                        std::make_shared<std::optional<CurrentlyPlayingDto>>(
+                            std::make_optional(
+                                parse_currently_playing(result->body))),
                         std::memory_order_release);
                 } else if (result->status == 404) {
-                    currentlyPlaying.store(nullptr, std::memory_order_release);
+                    currentlyPlaying.store(
+                        std::make_shared<std::optional<CurrentlyPlayingDto>>(
+                            std::nullopt),
+                        std::memory_order_release);
                 } else {
                     ErrorDto error = parse_error(result->body);
                     std::cerr
