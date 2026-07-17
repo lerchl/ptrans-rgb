@@ -236,7 +236,6 @@ int main(int argc, char *argv[]) {
     const Color SF_BLACK = {0, 0, 0};
 
     std::vector<SFCell> cells(sf_num_cells(false));
-    std::vector<SFChar> previous_target(sf_num_cells(false));
 
     auto sf_last_step = std::chrono::steady_clock::now();
 
@@ -283,6 +282,9 @@ int main(int argc, char *argv[]) {
     };
 
     bool lastFrameInBlackoutWindow = false;
+    TimetableDto last_timetable;
+    std::string last_text;
+    std::vector<SFChar> last_target;
     std::optional<CurrentlyPlayingDto> last_currently_playing;
     Image current_album_art;
 
@@ -341,6 +343,9 @@ int main(int argc, char *argv[]) {
                         sf_num_cols(current_currently_playing->has_value()),
                         "ptrans.home.l3rchl.at",
                         current_config->colors.fg_default);
+            } else if (*t == last_text &&
+                       *current_currently_playing == last_currently_playing) {
+                new_target = last_target;
             } else {
                 auto cps = sf_utf8_split(*t);
                 new_target.resize(
@@ -354,82 +359,14 @@ int main(int argc, char *argv[]) {
             }
         } else if (current_config->mode == PTRANS) {
             auto tt = timetable.load(std::memory_order_acquire);
+
             if (!tt) {
-                charset = sf_charset(current_config->colors.fg_default, false);
-                const int charset_size = (int)charset.size();
-                const int perimeter_len =
-                    2 * (SF_NUM_ROWS +
-                         sf_num_cols(current_currently_playing->has_value())) -
-                    4;
-
-                static int frame_t = 0;
-                static int revealed = 0;
-                frame_t++;
-                if (revealed < perimeter_len)
-                    revealed++;
-
-                const std::string WAITING = "Waiting for timetable";
-                auto waiting_cps = sf_utf8_split(WAITING);
-                int text_start_col =
-                    (sf_num_cols(current_currently_playing->has_value()) -
-                     (int)waiting_cps.size()) /
-                    2;
-                int text_row = SF_NUM_ROWS / 2;
-
-                new_target.resize(
-                    sf_num_cells(current_currently_playing->has_value()));
-                for (int i = 0;
-                     i < sf_num_cells(current_currently_playing->has_value());
-                     ++i) {
-                    int col =
-                        i % sf_num_cols(current_currently_playing->has_value());
-                    int row =
-                        i / sf_num_cols(current_currently_playing->has_value());
-
-                    bool is_frame =
-                        (row == 0 || row == SF_NUM_ROWS - 1 || col == 0 ||
-                         col == sf_num_cols(
-                                    current_currently_playing->has_value()) -
-                                    1);
-                    bool is_text =
-                        (row == text_row && col >= text_start_col &&
-                         col < text_start_col + (int)waiting_cps.size());
-
-                    if (is_text && !is_frame) {
-                        int text_col = col - text_start_col;
-                        new_target[i] = {waiting_cps[text_col],
-                                         current_config->colors.fg_default};
-                    } else if (is_frame) {
-                        int perimeter_pos =
-                            (col == 0)                 ? row
-                            : (row == SF_NUM_ROWS - 1) ? (SF_NUM_ROWS - 1 + col)
-                            : (col ==
-                               sf_num_cols(
-                                   current_currently_playing->has_value()) -
-                                   1)
-                                ? (SF_NUM_ROWS - 1 +
-                                   sf_num_cols(
-                                       current_currently_playing->has_value()) -
-                                   1 + (SF_NUM_ROWS - 1 - row))
-                                : (2 * (SF_NUM_ROWS - 1) +
-                                   sf_num_cols(
-                                       current_currently_playing->has_value()) -
-                                   1 +
-                                   (sf_num_cols(current_currently_playing
-                                                    ->has_value()) -
-                                    1 - col));
-
-                        if (perimeter_pos < revealed) {
-                            int idx = (perimeter_pos + frame_t) % charset_size;
-                            new_target[i] = {charset[idx].glyph,
-                                             current_config->colors.fg_default};
-                        } else {
-                            new_target[i] = {" ", {0, 0, 0}};
-                        }
-                    } else {
-                        new_target[i] = {" ", {0, 0, 0}};
-                    }
-                }
+                new_target = sf_pad_line(
+                    sf_num_cols(current_currently_playing->has_value()),
+                    "Waiting...", current_config->colors.fg_default);
+            } else if (*tt == last_timetable &&
+                       *current_currently_playing == last_currently_playing) {
+                new_target = last_target;
             } else {
                 auto departure_color = [&](bool real_time, bool late,
                                            bool traffic_jam) -> Color {
@@ -631,12 +568,13 @@ int main(int argc, char *argv[]) {
         }
 
         sf_update_cells(sf_num_cells(current_currently_playing->has_value()),
-                        SF_BLACK, cells, previous_target, new_target, charset);
+                        SF_BLACK, cells, last_target, new_target, charset);
         sf_render_cells(sf_num_cells(current_currently_playing->has_value()),
                         sf_num_cols(current_currently_playing->has_value()),
                         SF_CELL_W, SF_CELL_H, SF_CELL_GAP, font, offscreen,
                         cells, step, charset);
 
+        last_target = new_target;
         last_currently_playing = *current_currently_playing;
 
         offscreen = matrix->SwapOnVSync(offscreen);

@@ -8,6 +8,8 @@ using json = nlohmann::json;
 struct CurrentlyPlayingDto {
     bool is_paused;
     std::optional<std::string> album_cover_url;
+
+    bool operator==(const CurrentlyPlayingDto &) const = default;
 };
 
 void from_json(const json &j, CurrentlyPlayingDto &d);
