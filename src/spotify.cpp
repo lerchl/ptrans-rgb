@@ -43,7 +43,7 @@ std::function<void(std::string)> make_spotify_job(
                             std::make_optional(
                                 parse_currently_playing(result->body))),
                         std::memory_order_release);
-                } else if (result->status == 404) {
+                } else if (result->status == 204) {
                     currentlyPlaying.store(
                         std::make_shared<std::optional<CurrentlyPlayingDto>>(
                             std::nullopt),
