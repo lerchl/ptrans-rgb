@@ -3,6 +3,7 @@
 #include <httplib.h>
 
 #include "lio.hpp"
+#include "error.hpp"
 
 void from_json(const json &j, DepartureDto &d) {
     d.direction = j.value("direction", std::optional<std::string>{});
@@ -27,15 +28,6 @@ void from_json(const json &j, TimetableDto &tt) {
 TimetableDto parse_timetable(const std::string &body) {
     json j = json::parse(body);
     return j.get<TimetableDto>();
-}
-
-void from_json(const json &j, ErrorDto &e) {
-    e.message = j.at("message").get<std::string>();
-}
-
-ErrorDto parse_error(const std::string &body) {
-    json j = json::parse(body);
-    return j.get<ErrorDto>();
 }
 
 std::function<void(std::string)>

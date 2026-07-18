@@ -21,7 +21,7 @@ struct BlackoutWindow {
     Time end;
     bool override;
 
-    bool isDuringBlackout(const Time&) const;
+    bool isDuringBlackout(const Time &) const;
 };
 void from_json(const json &j, BlackoutWindow &b);
 void to_json(json &j, const BlackoutWindow &b);
@@ -31,6 +31,7 @@ struct Color {
     uint8_t g;
     uint8_t b;
 
+    bool operator==(const Color &other) const;
     operator rgb_matrix::Color() const;
 };
 void from_json(const json &j, Color &c);
@@ -51,7 +52,7 @@ struct Configuration {
     BlackoutWindow blackout_window;
     Colors colors;
 };
-void from_json(const json&j, Configuration &c);
+void from_json(const json &j, Configuration &c);
 void to_json(json &j, const Configuration &c);
 
 struct PatchConfigurationDto {

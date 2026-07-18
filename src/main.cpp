@@ -11,6 +11,7 @@
 #include <iostream>
 #include <memory>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,10 +20,13 @@
 #include <time.h>
 #include <vector>
 
+#include "album_cover.hpp"
 #include "config.hpp"
 #include "config_manager.hpp"
 #include "http_server.hpp"
 #include "lio.hpp"
+#include "split_flap.hpp"
+#include "spotify.hpp"
 
 #ifndef APP_VERSION
 #define APP_VERSION "unknown"
@@ -38,25 +42,7 @@ rgb_matrix::RGBMatrix *matrix;
 httplib::Server http_server;
 std::thread http_server_thread;
 std::thread timetable_job_thread;
-
-struct SFChar {
-    std::string glyph;
-    Color color;
-};
-
-bool operator==(const Color &a, const Color &b) {
-    return a.r == b.r && a.g == b.g && a.b == b.b;
-}
-
-bool operator==(const SFChar &a, const SFChar &b) {
-    return a.glyph == b.glyph && a.color == b.color;
-}
-
-std::vector<SFChar> operator+(std::vector<SFChar> a,
-                              const std::vector<SFChar> &b) {
-    a.insert(a.end(), b.begin(), b.end());
-    return a;
-}
+std::thread spotify_job_thread;
 
 static void interrupt_handler(int) {
     app_running = false;
@@ -65,6 +51,7 @@ static void interrupt_handler(int) {
     http_server.stop();
     http_server_thread.join();
     timetable_job_thread.join();
+    spotify_job_thread.join();
 
     delete matrix;
 
@@ -100,14 +87,33 @@ Time nowTime() {
 }
 
 std::string pad_utf8(const std::string &s, size_t width) {
+    // Find the byte offset where the `width`-th codepoint starts (if any),
+    // so we can truncate without splitting a multi-byte UTF-8 sequence.
     size_t codepoints = 0;
-    for (unsigned char c : s) {
+    size_t truncate_at = s.size(); // default: no truncation needed
+
+    for (size_t i = 0; i < s.size();) {
+        unsigned char c = s[i];
         if ((c & 0xC0) != 0x80) {
+            if (codepoints == width) {
+                truncate_at = i;
+                break;
+            }
             codepoints++;
         }
+        ++i;
     }
+
+    std::string truncated = s.substr(0, truncate_at);
+
     size_t padding = (codepoints < width) ? width - codepoints : 0;
-    return s + std::string(padding, ' ');
+    return truncated + std::string(padding, ' ');
+}
+
+std::vector<SFChar> operator+(std::vector<SFChar> a,
+                              const std::vector<SFChar> &b) {
+    a.insert(a.end(), b.begin(), b.end());
+    return a;
 }
 
 int main(int argc, char *argv[]) {
@@ -175,21 +181,30 @@ int main(int argc, char *argv[]) {
     signal(SIGTERM, interrupt_handler);
     signal(SIGINT, interrupt_handler);
 
-    std::atomic<std::shared_ptr<TimetableDto>> timetable;
     std::atomic<std::shared_ptr<const std::string>> text;
+    std::atomic<std::shared_ptr<TimetableDto>> timetable;
+    std::atomic<std::shared_ptr<std::optional<CurrentlyPlayingDto>>>
+        currently_playing =
+            std::make_shared<std::optional<CurrentlyPlayingDto>>(std::nullopt);
 
     auto run_http_server = make_http_server(APP_VERSION, config_manager, text);
     auto run_timetable_job =
         make_timetable_job(app_cv, app_mutex, app_running, timetable);
+    auto run_spotify_job =
+        make_spotify_job(app_cv, app_mutex, app_running, currently_playing);
     http_server_thread = std::thread(
         [&run_http_server, port]() { run_http_server(http_server, port); });
     timetable_job_thread = std::thread(
         [&run_timetable_job, data_url]() { run_timetable_job(data_url); });
+    spotify_job_thread = std::thread(
+        [&run_spotify_job, data_url]() { run_spotify_job(data_url); });
 
     // --- Derived layout constants ---
-    // Matrix dimensions come from the matrix itself, so --led-chain etc. are
-    // respected
-    const int SF_MATRIX_W = matrix->width();
+    // Matrix dimensions come from the matrix itself, so --led-chain etc.
+    // are respected
+    const auto sf_matrix_w = [&](bool only_2_displays) {
+        return only_2_displays ? matrix->width() - 64 : matrix->width();
+    };
     const int SF_MATRIX_H = matrix->height();
     const int SF_MS_PER_STEP = 25;
 
@@ -201,199 +216,77 @@ int main(int argc, char *argv[]) {
     const int SF_CELL_W = SF_CHAR_W;
 
     const int SF_NUM_ROWS = SF_MATRIX_H / SF_CELL_H;
-    const int SF_NUM_COLS = SF_MATRIX_W / (SF_CELL_W + SF_CELL_GAP);
-    const int SF_NUM_CELLS = SF_NUM_ROWS * SF_NUM_COLS;
+    const auto sf_num_cols = [&](bool only_2_displays) {
+        return sf_matrix_w(only_2_displays) / (SF_CELL_W + SF_CELL_GAP);
+    };
+    const auto sf_num_cells = [&](bool only_2_displays) {
+        return SF_NUM_ROWS * sf_num_cols(only_2_displays);
+    };
 
     const int SF_COL_LINE = 3;
-    const int SF_COL_DEPS = 9;
+    const auto sf_col_deps = [](bool only_2_displays) {
+        return only_2_displays ? 3 : 9;
+    };
     const int SF_COL_SPACE = 2;
-    const int SF_COL_DIR =
-        SF_NUM_COLS - SF_COL_LINE - SF_COL_DEPS - SF_COL_SPACE;
+    const auto sf_col_dir = [&](bool only_2_displays) {
+        return sf_num_cols(only_2_displays) - SF_COL_LINE -
+               sf_col_deps(only_2_displays) - SF_COL_SPACE;
+    };
 
     const Color SF_BLACK = {0, 0, 0};
 
-    const std::vector<SFChar> SF_BLOCK_CHARS = {
-        {"█", {255, 80, 80}}, {"█", {255, 160, 0}}, {"█", {255, 255, 0}},
-        {"█", {80, 255, 80}}, {"█", {0, 200, 255}}, {"█", {160, 80, 255}},
-    };
-
-    // charset is built with the current fg_default so normal glyphs carry that
-    // color. Block chars always keep their fixed colors.
-    auto sf_charset = [&](const Color &fg_default, bool block_chars) {
-        std::vector<SFChar> cs;
-
-        if (block_chars) {
-            for (auto &b : SF_BLOCK_CHARS) {
-                cs.push_back(b);
-            }
-        }
-
-        for (auto &g : std::vector<std::string>{
-                 " ", "A", "Ä", "B", "C", "D", "E",  "F", "G", "H", "I", "J",
-                 "K", "L", "M", "N", "O", "Ö", "P",  "Q", "R", "S", "T", "U",
-                 "Ü", "V", "W", "X", "Y", "Z", "a",  "ä", "b", "c", "d", "e",
-                 "f", "g", "h", "i", "j", "k", "l",  "m", "n", "o", "ö", "p",
-                 "q", "r", "s", "ß", "t", "u", "ü",  "v", "w", "x", "y", "z",
-                 "0", "1", "2", "3", "4", "5", "6",  "7", "8", "9", ".", ",",
-                 ":", ";", " ", "!", "?", "-", "–",  "(", ")", "/", "@", "#",
-                 "%", "&", "=", "+", "_", "'", "\"", "$", "€", "*"}) {
-            cs.push_back({g, fg_default});
-        }
-
-        return cs;
-    };
-
-    auto sf_charset_index = [&](const std::vector<SFChar> &charset,
-                                const std::string &glyph) {
-        int size = (int)charset.size();
-        for (int i = 0; i < size; ++i) {
-            if (charset[i].glyph == glyph) {
-                return i;
-            }
-        }
-        return 0;
-    };
-
-    auto sf_utf8_split = [](const std::string &s) {
-        std::vector<std::string> result;
-        size_t i = 0;
-        while (i < s.size()) {
-            unsigned char c = s[i];
-            int len = 1;
-            if ((c & 0xE0) == 0xC0) {
-                len = 2;
-            } else if ((c & 0xF0) == 0xE0) {
-                len = 3;
-            } else if ((c & 0xF8) == 0xF0) {
-                len = 4;
-            }
-            result.push_back(s.substr(i, len));
-            i += len;
-        }
-        return result;
-    };
-
-    struct SFCell {
-        int char_index = 0;
-        int target_index = 0;
-        int steps_left = 0;
-        bool flipping = false;
-        rgb_matrix::Color target_color = rgb_matrix::Color(255, 255, 255);
-    };
-
-    std::vector<SFCell> cells(SF_NUM_CELLS);
-    std::vector<SFChar> previous_target(SF_NUM_CELLS);
+    std::vector<SFCell> cells(sf_num_cells(false));
 
     auto sf_last_step = std::chrono::steady_clock::now();
 
-    auto sf_update_cells = [&](std::vector<SFCell> &cells,
-                               std::vector<SFChar> &last_target,
-                               const std::vector<SFChar> &new_target,
-                               const std::vector<SFChar> &charset) {
-        if (new_target == last_target) {
-            return;
-        }
-
-        last_target = new_target;
-        int charset_size = (int)charset.size();
-        for (int i = 0; i < SF_NUM_CELLS; ++i) {
-            const SFChar &tc = (i < (int)new_target.size())
-                                   ? new_target[i]
-                                   : SFChar{" ", SF_BLACK};
-            int ti = sf_charset_index(charset, tc.glyph);
-            int steps =
-                (ti - cells[i].char_index + charset_size) % charset_size;
-            cells[i].target_index = ti;
-            cells[i].target_color =
-                rgb_matrix::Color(tc.color.r, tc.color.g, tc.color.b);
-            cells[i].steps_left = steps;
-            cells[i].flipping = (steps > 0);
-        }
-    };
-
-    // During a flip the cell cycles through charset glyphs. Intermediate glyphs
-    // are drawn in fg_default; only the final target glyph gets target_color.
-    auto sf_render_cells = [&](std::vector<SFCell> &cells, bool step,
-                               const std::vector<SFChar> &charset) {
-        int charset_size = (int)charset.size();
-        for (int i = 0; i < SF_NUM_CELLS; ++i) {
-            SFCell &cell = cells[i];
-            int row = i / SF_NUM_COLS;
-            int col = i % SF_NUM_COLS;
-            int px = 1 + col * (SF_CELL_W + SF_CELL_GAP);
-            int py = font.baseline() + row * SF_CELL_H;
-
-            // Use target color only when settled on the target glyph.
-            rgb_matrix::Color draw_color = cell.flipping
-                                               ? charset[cell.char_index].color
-                                               : cell.target_color;
-
-            const SFChar &sc = charset[cell.char_index];
-            rgb_matrix::DrawText(offscreen, font, px, py, draw_color, nullptr,
-                                 sc.glyph.c_str());
-
-            if (cell.flipping && step) {
-                cell.char_index = (cell.char_index + 1) % charset_size;
-                cell.steps_left--;
-                if (cell.steps_left <= 0) {
-                    cell.char_index = cell.target_index;
-                    cell.flipping = false;
-                }
-            }
-        }
-    };
-
-    auto sf_pad_line = [&](const std::string &s, const Color &color) {
-        auto cps = sf_utf8_split(s);
-        std::vector<SFChar> result;
-        for (int i = 0; i < SF_NUM_COLS; ++i) {
-            std::string glyph = (i < (int)cps.size()) ? cps[i] : " ";
-            result.push_back({glyph, color});
-        }
-        return result;
-    };
-
-    auto build_footer_pages = [&](const std::string &text) {
-        std::vector<std::string> pages;
-
-        std::istringstream iss(text);
-        std::string word;
-        std::vector<std::string> words;
-
-        while (iss >> word) {
-            words.push_back(word);
-        }
-
-        // Worst case: " 99/99"
-        constexpr int PAGE_INDICATOR_WIDTH = 6;
-        const int TEXT_WIDTH = SF_NUM_COLS - PAGE_INDICATOR_WIDTH;
-
-        std::string current;
-
-        for (const auto &w : words) {
-            int needed = current.empty()
-                             ? (int)sf_utf8_split(w).size()
-                             : (int)sf_utf8_split(current + " " + w).size();
-
-            if (needed > TEXT_WIDTH) {
-                pages.push_back(current);
-                current = w;
-            } else {
-                if (!current.empty()) {
-                    current += ' ';
-                }
-                current += w;
-            }
-        }
-
-        if (!current.empty()) {
-            pages.push_back(current);
-        }
-
-        return pages;
-    };
+    // auto build_footer_pages = [&](const std::string &text,
+    //                               bool only_2_displays) {
+    //     std::vector<std::string> pages;
+    //
+    //     std::istringstream iss(text);
+    //     std::string word;
+    //     std::vector<std::string> words;
+    //
+    //     while (iss >> word) {
+    //         words.push_back(word);
+    //     }
+    //
+    //     // Worst case: " 99/99"
+    //     constexpr int PAGE_INDICATOR_WIDTH = 6;
+    //     const int TEXT_WIDTH =
+    //         sf_num_cols(only_2_displays) - PAGE_INDICATOR_WIDTH;
+    //
+    //     std::string current;
+    //
+    //     for (const auto &w : words) {
+    //         int needed = current.empty()
+    //                          ? (int)sf_utf8_split(w).size()
+    //                          : (int)sf_utf8_split(current + " " + w).size();
+    //
+    //         if (needed > TEXT_WIDTH) {
+    //             pages.push_back(current);
+    //             current = w;
+    //         } else {
+    //             if (!current.empty()) {
+    //                 current += ' ';
+    //             }
+    //             current += w;
+    //         }
+    //     }
+    //
+    //     if (!current.empty()) {
+    //         pages.push_back(current);
+    //     }
+    //
+    //     return pages;
+    // };
 
     bool lastFrameInBlackoutWindow = false;
+    TimetableDto last_timetable;
+    std::string last_text;
+    std::vector<SFChar> last_target;
+    std::optional<CurrentlyPlayingDto> last_currently_playing;
+    Image current_album_art;
 
     for (;;) {
         auto current_config = config_manager.get();
@@ -423,6 +316,9 @@ int main(int argc, char *argv[]) {
             lastFrameInBlackoutWindow = false;
         }
 
+        auto current_currently_playing =
+            currently_playing.load(std::memory_order_acquire);
+
         auto frame_start = std::chrono::steady_clock::now();
         bool step = std::chrono::duration_cast<std::chrono::milliseconds>(
                         frame_start - sf_last_step)
@@ -438,73 +334,39 @@ int main(int argc, char *argv[]) {
         if (current_config->mode == TEXT) {
             auto t = text.load(std::memory_order_acquire);
             if (!t) {
-                new_target = sf_pad_line("No text set! Go to",
-                                         current_config->colors.fg_default) +
-                             sf_pad_line("ptrans.home.l3rchl.at",
-                                         current_config->colors.fg_default);
+                new_target =
+                    sf_pad_line(
+                        sf_num_cols(current_currently_playing->has_value()),
+                        "No text set! Go to",
+                        current_config->colors.fg_default) +
+                    sf_pad_line(
+                        sf_num_cols(current_currently_playing->has_value()),
+                        "ptrans.home.l3rchl.at",
+                        current_config->colors.fg_default);
+            } else if (*t == last_text &&
+                       *current_currently_playing == last_currently_playing) {
+                new_target = last_target;
             } else {
                 auto cps = sf_utf8_split(*t);
-                new_target.resize(SF_NUM_CELLS);
-                for (int i = 0; i < SF_NUM_CELLS; ++i) {
+                new_target.resize(
+                    sf_num_cells(current_currently_playing->has_value()));
+                for (int i = 0;
+                     i < sf_num_cells(current_currently_playing->has_value());
+                     ++i) {
                     new_target[i] = {i < std::ssize(cps) ? cps[i] : " ",
                                      current_config->colors.fg_default};
                 }
             }
         } else if (current_config->mode == PTRANS) {
             auto tt = timetable.load(std::memory_order_acquire);
+
             if (!tt) {
-                charset = sf_charset(current_config->colors.fg_default, false);
-                const int charset_size = (int)charset.size();
-                const int perimeter_len = 2 * (SF_NUM_ROWS + SF_NUM_COLS) - 4;
-
-                static int frame_t = 0;
-                static int revealed = 0;
-                frame_t++;
-                if (revealed < perimeter_len)
-                    revealed++;
-
-                const std::string WAITING = "Waiting for timetable";
-                auto waiting_cps = sf_utf8_split(WAITING);
-                int text_start_col =
-                    (SF_NUM_COLS - (int)waiting_cps.size()) / 2;
-                int text_row = SF_NUM_ROWS / 2;
-
-                new_target.resize(SF_NUM_CELLS);
-                for (int i = 0; i < SF_NUM_CELLS; ++i) {
-                    int col = i % SF_NUM_COLS;
-                    int row = i / SF_NUM_COLS;
-
-                    bool is_frame = (row == 0 || row == SF_NUM_ROWS - 1 ||
-                                     col == 0 || col == SF_NUM_COLS - 1);
-                    bool is_text =
-                        (row == text_row && col >= text_start_col &&
-                         col < text_start_col + (int)waiting_cps.size());
-
-                    if (is_text && !is_frame) {
-                        int text_col = col - text_start_col;
-                        new_target[i] = {waiting_cps[text_col],
-                                         current_config->colors.fg_default};
-                    } else if (is_frame) {
-                        int perimeter_pos =
-                            (col == 0)                 ? row
-                            : (row == SF_NUM_ROWS - 1) ? (SF_NUM_ROWS - 1 + col)
-                            : (col == SF_NUM_COLS - 1)
-                                ? (SF_NUM_ROWS - 1 + SF_NUM_COLS - 1 +
-                                   (SF_NUM_ROWS - 1 - row))
-                                : (2 * (SF_NUM_ROWS - 1) + SF_NUM_COLS - 1 +
-                                   (SF_NUM_COLS - 1 - col));
-
-                        if (perimeter_pos < revealed) {
-                            int idx = (perimeter_pos + frame_t) % charset_size;
-                            new_target[i] = {charset[idx].glyph,
-                                             current_config->colors.fg_default};
-                        } else {
-                            new_target[i] = {" ", {0, 0, 0}};
-                        }
-                    } else {
-                        new_target[i] = {" ", {0, 0, 0}};
-                    }
-                }
+                new_target = sf_pad_line(
+                    sf_num_cols(current_currently_playing->has_value()),
+                    "Waiting...", current_config->colors.fg_default);
+            } else if (*tt == last_timetable &&
+                       *current_currently_playing == last_currently_playing) {
+                new_target = last_target;
             } else {
                 auto departure_color = [&](bool real_time, bool late,
                                            bool traffic_jam) -> Color {
@@ -536,7 +398,11 @@ int main(int argc, char *argv[]) {
                     dl.line_name = trip.line;
                     dl.direction = trip.direction;
 
-                    for (auto &&dep : trip.departures | std::views::take(3)) {
+                    for (auto &&dep :
+                         trip.departures |
+                             std::views::take(
+                                 current_currently_playing->has_value() ? 1
+                                                                        : 3)) {
                         std::string s = dep.countdown == 0
                                             ? "*"
                                             : std::to_string(dep.countdown);
@@ -555,8 +421,9 @@ int main(int argc, char *argv[]) {
                 new_target.clear();
                 for (int row = 0; row < SF_NUM_ROWS - 1; ++row) {
                     if (row >= (int)display_lines.size()) {
-                        auto padding =
-                            sf_pad_line("", current_config->colors.fg_default);
+                        auto padding = sf_pad_line(
+                            sf_num_cols(current_currently_playing->has_value()),
+                            "", current_config->colors.fg_default);
                         new_target.insert(new_target.end(), padding.begin(),
                                           padding.end());
                         continue;
@@ -565,6 +432,8 @@ int main(int argc, char *argv[]) {
                     auto &dl = display_lines[row];
 
                     // line name + direction in default color
+                    int SF_COL_DIR =
+                        sf_col_dir(current_currently_playing->has_value());
                     std::string prefix = std::format(
                         "{:<{}} {:<{}} ", dl.line_name, SF_COL_LINE,
                         pad_utf8(dl.direction, SF_COL_DIR), SF_COL_DIR);
@@ -587,7 +456,9 @@ int main(int argc, char *argv[]) {
                         }
                     }
 
-                    int pad = SF_COL_DEPS - (int)dep_cells.size();
+                    int pad =
+                        sf_col_deps(current_currently_playing->has_value()) -
+                        (int)dep_cells.size();
                     for (int p = 0; p < pad; ++p) {
                         new_target.push_back(
                             {" ", current_config->colors.fg_default});
@@ -598,45 +469,115 @@ int main(int argc, char *argv[]) {
                     }
                 }
 
-                if (tt->message.has_value()) {
-                    std::string footer_line = tt->message.value();
-                    if (footer_line.length() >
-                        static_cast<size_t>(SF_NUM_COLS)) {
-                        auto pages = build_footer_pages(footer_line);
+                // if (tt->message.has_value()) {
+                //     std::string footer_line = tt->message.value();
+                //     if (footer_line.length() >
+                //         static_cast<size_t>(sf_num_cols(
+                //             current_currently_playing->has_value()))) {
+                //         auto pages = build_footer_pages(
+                //             footer_line,
+                //             current_currently_playing->has_value());
+                //
+                //         auto now = std::chrono::steady_clock::now();
+                //         auto seconds =
+                //             std::chrono::duration_cast<std::chrono::seconds>(
+                //                 now.time_since_epoch())
+                //                 .count();
+                //
+                //         size_t page = (seconds / 5) % pages.size();
+                //
+                //         std::string indicator =
+                //             std::format("{}/{}", page + 1, pages.size());
+                //
+                //         footer_line = std::format(
+                //             "{:<{}}{:>{}}", pages[page],
+                //             sf_num_cols(
+                //                 current_currently_playing->has_value()) -
+                //                 (int)indicator.size(),
+                //             indicator, (int)indicator.size());
+                //     }
+                //
+                //     for (auto &cp : sf_utf8_split(footer_line)) {
+                //         new_target.push_back(
+                //             {cp, current_config->colors.fg_default});
+                //     }
+                // }
 
-                        auto now = std::chrono::steady_clock::now();
-                        auto seconds =
-                            std::chrono::duration_cast<std::chrono::seconds>(
-                                now.time_since_epoch())
-                                .count();
-
-                        size_t page = (seconds / 10) % pages.size();
-
-                        std::string indicator =
-                            std::format("{}/{}", page + 1, pages.size());
-
-                        footer_line =
-                            std::format("{:<{}}{:>{}}", pages[page],
-                                        SF_NUM_COLS - (int)indicator.size(),
-                                        indicator, (int)indicator.size());
-                    }
-
-                    for (auto &cp : sf_utf8_split(footer_line)) {
-                        new_target.push_back(
-                            {cp, current_config->colors.fg_default});
-                    }
-                }
+                last_timetable = *tt;
             }
         } else {
-            new_target = sf_pad_line("No mode set! Go to",
-                                     current_config->colors.fg_default) +
-                         sf_pad_line("ptrans.home.l3rchl.at",
-                                     current_config->colors.fg_default);
+            new_target =
+                sf_pad_line(sf_num_cols(current_currently_playing->has_value()),
+                            "No mode set! Go to",
+                            current_config->colors.fg_default) +
+                sf_pad_line(sf_num_cols(current_currently_playing->has_value()),
+                            "ptrans.home.l3rchl.at",
+                            current_config->colors.fg_default);
         }
 
         offscreen->Fill(bg_color.r, bg_color.g, bg_color.b);
-        sf_update_cells(cells, previous_target, new_target, charset);
-        sf_render_cells(cells, step, charset);
+
+        if (current_currently_playing->has_value() &&
+            current_currently_playing->value().album_cover_url.has_value() &&
+            (!last_currently_playing.has_value() ||
+             !last_currently_playing.value().album_cover_url.has_value() ||
+             last_currently_playing.value().album_cover_url.value() !=
+                 current_currently_playing->value().album_cover_url.value())) {
+            std::string raw_bytes;
+            if (!download_to_memory(
+                    current_currently_playing->value().album_cover_url.value(),
+                    &raw_bytes)) {
+                std::cerr << "Failed to download image from "
+                          << current_currently_playing->value()
+                                 .album_cover_url.value()
+                          << std::endl;
+                current_album_art = Image();
+            }
+            if (!decode_image(raw_bytes, &current_album_art)) {
+                std::cerr << "Failed to decode image from "
+                          << current_currently_playing->value()
+                                 .album_cover_url.value()
+                          << std::endl;
+                current_album_art = Image();
+            }
+        }
+
+        static float album_art_angle = 0.0f;
+        static auto album_art_last_update = std::chrono::steady_clock::now();
+        const float rotations_per_second = 0.05f; // tune to taste
+
+        auto now = std::chrono::steady_clock::now();
+        float delta_seconds =
+            std::chrono::duration<float>(now - album_art_last_update).count();
+        album_art_last_update = now;
+
+        bool is_playing = current_currently_playing->has_value() &&
+                          !current_currently_playing->value().is_paused;
+
+        if (is_playing) {
+            album_art_angle += 2.0f * static_cast<float>(M_PI) *
+                               rotations_per_second * delta_seconds;
+            if (album_art_angle > 2.0f * static_cast<float>(M_PI)) {
+                album_art_angle -= 2.0f * static_cast<float>(M_PI);
+            }
+        }
+
+        if (current_currently_playing->has_value() &&
+            current_album_art.width > 0) {
+            draw_spinning_circle(current_album_art, album_art_angle, 64, 0, 0,
+                                 offscreen, 2.0f);
+        }
+
+        sf_update_cells(sf_num_cells(current_currently_playing->has_value()),
+                        SF_BLACK, cells, last_target, new_target, charset);
+        sf_render_cells(sf_num_cells(current_currently_playing->has_value()),
+                        sf_num_cols(current_currently_playing->has_value()),
+                        SF_CELL_W, SF_CELL_H, SF_CELL_GAP, font, offscreen,
+                        cells, step, charset,
+                        current_currently_playing->has_value() ? 64 : 0);
+
+        last_target = new_target;
+        last_currently_playing = *current_currently_playing;
 
         offscreen = matrix->SwapOnVSync(offscreen);
     }
