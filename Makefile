@@ -5,6 +5,7 @@ RGB_INCDIR=$(RGB_LIB_DISTRIBUTION)/include
 RGB_LIBDIR=$(RGB_LIB_DISTRIBUTION)/lib
 RGB_LIBRARY_NAME=rgbmatrix
 RGB_LIBRARY=$(RGB_LIBDIR)/lib$(RGB_LIBRARY_NAME).a
+RGB_PATCH=patches/0001-add-ptrans-hardware-mapping.patch
 HTTP_LIB_DIR=external/cpp-httplib
 JSON_LIB_DIR=external/json/single_include
 LDFLAGS+=-L $(RGB_LIBDIR) -l$(RGB_LIBRARY_NAME) -lrt -lm -lpthread -lssl -lcrypto
@@ -14,7 +15,20 @@ CXXFLAGS=-std=c++23 -Wall -Wextra
 SRCS := $(shell find src -name '*.cpp')
 OBJS := $(patsubst src/%.cpp, build/obj/%.o, $(SRCS))
 
-$(RGB_LIBRARY):
+.PHONY: apply-patches
+
+apply-patches: $(RGB_PATCH)
+	@if git -C "$(RGB_LIB_DISTRIBUTION)" apply --reverse --check "$(abspath $(RGB_PATCH))" 2>/dev/null; then \
+		echo "$(RGB_PATCH) already applied"; \
+	elif git -C "$(RGB_LIB_DISTRIBUTION)" apply --check "$(abspath $(RGB_PATCH))" 2>/dev/null; then \
+		echo "Applying $(RGB_PATCH)"; \
+		git -C "$(RGB_LIB_DISTRIBUTION)" apply "$(abspath $(RGB_PATCH))"; \
+	else \
+		echo "error: $(RGB_PATCH) does not apply to $(RGB_LIB_DISTRIBUTION)" >&2; \
+		exit 1; \
+	fi
+
+$(RGB_LIBRARY): apply-patches
 	$(MAKE) -C $(RGB_LIBDIR)
 
 build/obj/%.o: src/%.cpp
