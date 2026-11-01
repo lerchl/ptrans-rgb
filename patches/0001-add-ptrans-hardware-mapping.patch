@@ -1,0 +1,51 @@
+diff --git a/lib/hardware-mapping.c b/lib/hardware-mapping.c
+index 758b428..66aba08 100644
+--- a/lib/hardware-mapping.c
++++ b/lib/hardware-mapping.c
+@@ -66,6 +66,46 @@ struct HardwareMapping matrix_hardware_mappings[] = {
+     .p2_b2         = GPIO_BIT(21),
+   },
+ 
++  /*
++   * Regular mapping for the ptrans matrix, with only the top-half red
++   * data line R1 moved from GPIO 11 to GPIO 26. All other chain-0 pins
++   * match the regular mapping.
++   * Note: GPIO 26 is normally chain 2/R2, so chain 2 is not available with
++   * this mapping.
++   */
++  {
++    .name          = "ptrans",
++
++    .output_enable = GPIO_BIT(18),
++    .clock         = GPIO_BIT(17),
++    .strobe        = GPIO_BIT(4),
++
++    /* Address lines */
++    .a             = GPIO_BIT(22),
++    .b             = GPIO_BIT(23),
++    .c             = GPIO_BIT(24),
++    .d             = GPIO_BIT(25),
++    .e             = GPIO_BIT(15),  /* RxD kept free unless 1:64 */
++
++    /* Parallel chain 0, RGB for both sub-panels */
++    .p0_r1         = GPIO_BIT(26),
++    .p0_g1         = GPIO_BIT(27),
++    .p0_b1         = GPIO_BIT(7),   /* masks: SPI0_CE1   */
++    .p0_r2         = GPIO_BIT(8),   /* masks: SPI0_CE0   */
++    .p0_g2         = GPIO_BIT(9),   /* masks: SPI0_MISO  */
++    .p0_b2         = GPIO_BIT(10),  /* masks: SPI0_MOSI  */
++
++    /* Chain 1 */
++    .p1_r1         = GPIO_BIT(12),
++    .p1_g1         = GPIO_BIT(5),
++    .p1_b1         = GPIO_BIT(6),
++    .p1_r2         = GPIO_BIT(19),
++    .p1_g2         = GPIO_BIT(13),
++    .p1_b2         = GPIO_BIT(20),
++
++    /* Chain 2 is not available: its R2 pin (GPIO 26) is used for R1. */
++  },
++
+   /*
+    * This is used if you have an Adafruit HAT in the default configuration
+    */
