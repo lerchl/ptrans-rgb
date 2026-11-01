@@ -5,7 +5,7 @@ Display public transport data in Vienna and what's currently playing on Spotify 
 ```mermaid
 flowchart LR
     AC["Mains 230V<br/>3x0.75mm², Schuko"] --> PSU["5V 20A PSU<br/>(L, N, earth)"]
-    PSU -- "+5V (2.5mm²)" --> WP["Wago +5V"]
+    PSU -- "+5V (2.5mm²), fuse 20A" --> WP["Wago +5V"]
     PSU -- "GND (2.5mm²)" --> WG["Wago GND"]
 
     WP --> SP["Panel power splitter"]
